@@ -11,6 +11,11 @@ An approval-gated revenue opportunity system powered by a six-agent team:
 
 Every public submission, paid action, and learning promotion remains subject to Daniel's authenticated approval.
 
+The live dashboard now includes per-opportunity detail pages with Repository Analyst,
+Risk & Compliance, and Solution Planner records, plus a complete audit feed. Verified
+income, costs, and hours can be recorded through the authenticated `POST /outcomes`
+endpoint so projected value never gets confused with money actually earned.
+
 A real-world, approval-gated agent that discovers public open-source coding bounties, verifies repository licenses, estimates risk-adjusted value, stores an audit trail, and learns from measured outcomes.
 
 ## Safety contract
