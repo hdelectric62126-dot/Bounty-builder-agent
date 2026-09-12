@@ -1,0 +1,40 @@
+name: Isolated client-code test
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "sandbox_samples/**"
+      - ".github/workflows/isolated-client-test.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Pull clean test image before network isolation
+        run: docker pull python:3.13-slim
+      - name: Execute without network, capabilities, secrets, or writable source
+        env:
+          JOB_PATH: sandbox_samples/smoke
+        run: |
+          docker run --rm \
+            --network none \
+            --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+            --pids-limit 64 \
+            --memory 512m \
+            --cpus 1 \
+            --security-opt no-new-privileges \
+            --cap-drop ALL \
+            --user 65534:65534 \
+            --volume "$GITHUB_WORKSPACE/$JOB_PATH:/work:ro" \
+            --workdir /work \
+            python:3.13-slim \
+            python -I -m unittest discover -s /work -v
