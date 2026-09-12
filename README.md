@@ -1,5 +1,16 @@
 # Bounty Builder Agent
 
+An approval-gated revenue opportunity system powered by a six-agent team:
+
+- **Bounty Builder** orchestrates storage, audits, and the dashboard.
+- **Opportunity Scout** searches multiple bounded public GitHub queries and deduplicates results.
+- **Repository Analyst** checks licensing, activity, language, tests, and issue clarity.
+- **Risk & Compliance Agent** applies hard stops and payment-adjusted expected value.
+- **Solution Planner** creates a proposal and test checklist only after risk approval.
+- **Performance Learner** measures real outcomes and proposes bounded changes; it cannot self-promote.
+
+Every public submission, paid action, and learning promotion remains subject to Daniel's authenticated approval.
+
 A real-world, approval-gated agent that discovers public open-source coding bounties, verifies repository licenses, estimates risk-adjusted value, stores an audit trail, and learns from measured outcomes.
 
 ## Safety contract
