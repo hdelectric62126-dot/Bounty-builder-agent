@@ -2,10 +2,12 @@ import os
 import secrets
 import threading
 import time
+import json
+from contextlib import asynccontextmanager
 from html import escape
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from learner import Learner
 from opportunity_scout import OpportunityScout
@@ -18,11 +20,29 @@ store = Store(os.path.join(DATA_DIR, "bounty_builder.db"))
 learner = Learner(os.path.join(DATA_DIR, "ranking_weights.json"))
 scout = OpportunityScout()
 performance_learner = PerformanceLearner()
-app = FastAPI(title="Bounty Builder Agent", version="1.0.0")
+scan_lock = threading.Lock()
+
+
+@asynccontextmanager
+async def lifespan(_app):
+    threading.Thread(target=worker, daemon=True).start()
+    yield
+
+
+app = FastAPI(title="Bounty Builder Agent", version="2.0.0", lifespan=lifespan)
 
 
 class Promotion(BaseModel):
     challenger: dict
+
+
+class Outcome(BaseModel):
+    opportunity_id: int = Field(gt=0)
+    result: str = Field(min_length=2, max_length=40)
+    income: float = Field(default=0, ge=0, le=1_000_000)
+    cost: float = Field(default=0, ge=0, le=1_000_000)
+    hours: float = Field(default=0, ge=0, le=10_000)
+    notes: str = Field(default="", max_length=2000)
 
 
 def require_admin(x_admin_token: str | None):
@@ -32,6 +52,8 @@ def require_admin(x_admin_token: str | None):
 
 
 def scan_once():
+    if not scan_lock.acquire(blocking=False):
+        return {"status": "already_running"}
     try:
         report = scout.scan()
         items = report.opportunities
@@ -43,19 +65,18 @@ def scan_once():
         store.audit("scout_completed", {"items": len(items), "fetched": report.fetched,
                     "duplicates": report.duplicates, "rejected": report.rejected,
                     "query_errors": report.query_errors, "learning": proposal})
+        return {"status": "complete", "items": len(items)}
     except Exception as exc:
         store.audit("scan_failed", {"error": type(exc).__name__, "message": str(exc)[:300]})
+        return {"status": "failed", "error": type(exc).__name__}
+    finally:
+        scan_lock.release()
 
 
 def worker():
     while True:
         scan_once()
         time.sleep(int(os.getenv("SCAN_SECONDS", "21600")))
-
-
-@app.on_event("startup")
-def start_worker():
-    threading.Thread(target=worker, daemon=True).start()
 
 
 @app.get("/health")
@@ -68,11 +89,35 @@ def agents():
     return {"status": "ok", "agents": store.agent_activity()}
 
 
+@app.get("/api/audit")
+def audit_feed(limit: int = 50):
+    return {"events": store.recent_audit(max(1, min(limit, 200)))}
+
+
+@app.get("/api/opportunities/{opportunity_id}")
+def opportunity_data(opportunity_id: int):
+    item = store.get_opportunity(opportunity_id)
+    if not item:
+        raise HTTPException(404, "opportunity not found")
+    return {"opportunity": item, "agent_records": store.agent_records_for(item["external_id"])}
+
+
 @app.post("/scan")
 def scan_now(x_admin_token: str | None = Header(default=None)):
     require_admin(x_admin_token)
-    scan_once()
-    return {"status": "complete", "stats": store.stats()}
+    result = scan_once()
+    return {**result, "stats": store.stats()}
+
+
+@app.post("/outcomes")
+def record_outcome(body: Outcome, x_admin_token: str | None = Header(default=None)):
+    require_admin(x_admin_token)
+    try:
+        outcome_id = store.record_outcome(body.opportunity_id, body.result.strip(),
+            body.income, body.cost, body.hours, body.notes.strip())
+    except KeyError:
+        raise HTTPException(404, "opportunity not found")
+    return {"status": "recorded", "outcome_id": outcome_id, "stats": store.stats()}
 
 
 @app.post("/learning/promote")
@@ -88,7 +133,7 @@ def dashboard():
     stats = store.stats()
     activity = stats["agent_activity"]
     rows = "".join(f"""<tr><td>{escape(x['status'])}</td><td>{x['risk_score']}</td>
-      <td><a href='{escape(x['url'])}'>{escape(x['title'])}</a></td>
+      <td><a href='/opportunities/{x['id']}'>{escape(x['title'])}</a><br><small><a href='{escape(x['url'])}'>GitHub source</a></small></td>
       <td>{escape(x['repository'])}</td><td>${x['reward']:.2f}</td>
       <td>${x['expected_value']:.2f}</td><td>{escape(x['license'])}</td>
       <td>{escape(x['reason'])}</td></tr>""" for x in store.list_opportunities())
@@ -109,7 +154,33 @@ def dashboard():
     <div class='card'>Solution plans<br><b>{activity['solution_planner']}</b></div>
     <div class='card'>Learning proposals<br><b>{activity['performance_learner']}</b></div></div>
     <table><thead><tr><th>Status</th><th>Score</th><th>Task</th><th>Repository</th><th>Reward</th><th>Expected value</th><th>License</th><th>Decision</th></tr></thead>
-    <tbody>{rows or '<tr><td colspan=8>First scan is starting…</td></tr>'}</tbody></table></body></html>"""
+    <tbody>{rows or '<tr><td colspan=8>First scan is starting…</td></tr>'}</tbody></table>
+    <p><a href='/audit'>View complete audit feed</a></p></body></html>"""
+
+
+@app.get("/opportunities/{opportunity_id}", response_class=HTMLResponse)
+def opportunity_detail(opportunity_id: int):
+    item = store.get_opportunity(opportunity_id)
+    if not item:
+        raise HTTPException(404, "opportunity not found")
+    records = store.agent_records_for(item["external_id"])
+    panels = "".join(f"<h2>{escape(record['agent'].replace('_', ' ').title())}</h2>"
+        f"<pre>{escape(json.dumps(record['payload'], indent=2))}</pre>" for record in records)
+    return f"""<!doctype html><html><head><meta name='viewport' content='width=device-width'>
+    <title>{escape(item['title'])}</title><style>body{{font-family:system-ui;background:#07111f;color:#eef;padding:24px;max-width:1000px;margin:auto}}
+    a{{color:#62d9ff}}pre{{white-space:pre-wrap;background:#10223b;padding:16px;border-radius:12px;overflow-wrap:anywhere}}</style></head><body>
+    <p><a href='/'>← Dashboard</a></p><h1>{escape(item['title'])}</h1>
+    <p>Status: <b>{escape(item['status'])}</b> · Score: {item['risk_score']} · Reward: ${item['reward']:.2f} · Expected value: ${item['expected_value']:.2f}</p>
+    <p><a href='{escape(item['url'])}'>Open original GitHub issue</a></p>{panels or '<p>No agent records yet.</p>'}</body></html>"""
+
+
+@app.get("/audit", response_class=HTMLResponse)
+def audit_page():
+    rows = "".join(f"<tr><td>{escape(x['created_at'])}</td><td>{escape(x['event'])}</td>"
+        f"<td><pre>{escape(json.dumps(x['details'], indent=2))}</pre></td></tr>" for x in store.recent_audit())
+    return f"""<!doctype html><html><head><meta name='viewport' content='width=device-width'><title>Audit feed</title>
+    <style>body{{font-family:system-ui;background:#07111f;color:#eef;padding:24px}}a{{color:#62d9ff}}table{{width:100%;border-collapse:collapse}}td,th{{padding:9px;border-bottom:1px solid #29405e;text-align:left;vertical-align:top}}pre{{white-space:pre-wrap}}</style></head>
+    <body><p><a href='/'>← Dashboard</a></p><h1>Complete audit feed</h1><table><tr><th>Time</th><th>Event</th><th>Details</th></tr>{rows}</table></body></html>"""
 
 
 if __name__ == "__main__":
