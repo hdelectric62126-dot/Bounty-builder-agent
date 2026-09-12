@@ -78,16 +78,13 @@ def scan_once():
         items = report.opportunities
         for item in items:
             store.save_opportunity(item)
-            if item["status"] == "APPROVED":
-                saved = next((x for x in store.list_opportunities(200)
-                              if x["external_id"] == item["external_id"]), None)
-                if saved:
-                    thought = deliberate(saved, store.agent_record_map(item["external_id"]),
-                                         store.experience_stats()).to_dict()
-                    stage = store.enqueue_work(saved["id"], thought)
-                    store.audit("deep_deliberation_completed", {"opportunity_id": saved["id"],
-                                "decision_id": thought["decision_id"], "stage": stage,
-                                "confidence": thought["confidence"]})
+        for saved in (x for x in store.list_opportunities(200) if x["status"] == "APPROVED"):
+            thought = deliberate(saved, store.agent_record_map(saved["external_id"]),
+                                 store.experience_stats()).to_dict()
+            stage = store.enqueue_work(saved["id"], thought)
+            store.audit("deep_deliberation_completed", {"opportunity_id": saved["id"],
+                        "decision_id": thought["decision_id"], "stage": stage,
+                        "confidence": thought["confidence"]})
         proposal = learner.propose(store.outcomes())
         performance = performance_learner.propose(store.performance_rows())
         store.save_learning_proposal(performance)
