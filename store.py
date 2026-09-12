@@ -24,6 +24,15 @@ CREATE TABLE IF NOT EXISTS agent_records (
  id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT, agent TEXT,
  payload TEXT, created_at TEXT, UNIQUE(external_id, agent)
 );
+CREATE TABLE IF NOT EXISTS experience_cases (
+ id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT UNIQUE, sampled_year INTEGER,
+ repository TEXT, category TEXT, cycle_days INTEGER, comments INTEGER,
+ labels TEXT, state_reason TEXT, source_url TEXT, learned_at TEXT
+);
+CREATE TABLE IF NOT EXISTS work_reviews (
+ id INTEGER PRIMARY KEY AUTOINCREMENT, opportunity_id INTEGER, evidence_id TEXT UNIQUE,
+ decision TEXT, payload TEXT, created_at TEXT
+);
 """
 
 
@@ -112,6 +121,35 @@ class Store:
             db.execute("INSERT INTO learning_proposals VALUES(NULL,?,?,?)",
                        (json.dumps(proposal), proposal.get("status", "proposal_only"), now()))
 
+    def save_experience(self, cases):
+        saved = 0
+        with self.connect() as db:
+            for case in cases:
+                cursor = db.execute("""INSERT OR IGNORE INTO experience_cases
+                  VALUES(NULL,?,?,?,?,?,?,?,?,?,?)""", (case["external_id"],
+                  case["sampled_year"], case["repository"], case["category"],
+                  case["cycle_days"], case["comments"], json.dumps(case["labels"]),
+                  case["state_reason"], case["source_url"], now()))
+                saved += cursor.rowcount
+        return saved
+
+    def experience_stats(self):
+        with self.connect() as db:
+            row = db.execute("""SELECT COUNT(*) cases, COUNT(DISTINCT sampled_year) years,
+              ROUND(AVG(cycle_days),1) average_cycle_days FROM experience_cases""").fetchone()
+            categories = {r["category"]: r["count"] for r in db.execute(
+                "SELECT category, COUNT(*) count FROM experience_cases GROUP BY category")}
+            return {**dict(row), "categories": categories}
+
+    def save_work_review(self, opportunity_id, decision, payload):
+        with self.connect() as db:
+            if not db.execute("SELECT 1 FROM opportunities WHERE id=?", (opportunity_id,)).fetchone():
+                raise KeyError("opportunity not found")
+            db.execute("INSERT OR REPLACE INTO work_reviews VALUES(NULL,?,?,?,?,?)",
+                (opportunity_id, decision["evidence_id"], decision["status"],
+                 json.dumps(payload), now()))
+        self.audit("delivery_reviewed", {"opportunity_id": opportunity_id, **decision})
+
     def agent_activity(self):
         with self.connect() as db:
             records = {row["agent"]: row["count"] for row in db.execute(
@@ -124,6 +162,8 @@ class Store:
                 "risk_compliance_agent": records.get("risk_compliance_agent", 0),
                 "solution_planner": records.get("solution_planner", 0),
                 "performance_learner": proposals,
+                "historical_experience": self.experience_stats()["cases"],
+                "delivery_reviews": db.execute("SELECT COUNT(*) FROM work_reviews").fetchone()[0],
             }
 
     def stats(self):
