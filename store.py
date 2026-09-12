@@ -20,6 +20,10 @@ CREATE TABLE IF NOT EXISTS audit_log (
 CREATE TABLE IF NOT EXISTS learning_proposals (
  id INTEGER PRIMARY KEY AUTOINCREMENT, proposal TEXT, status TEXT, created_at TEXT
 );
+CREATE TABLE IF NOT EXISTS agent_records (
+ id INTEGER PRIMARY KEY AUTOINCREMENT, external_id TEXT, agent TEXT,
+ payload TEXT, created_at TEXT, UNIQUE(external_id, agent)
+);
 """
 
 
@@ -46,6 +50,14 @@ class Store:
                 item["external_id"], item["title"], item["url"], item["repository"],
                 item["reward"], item["license"], item["status"], item["risk_score"],
                 item["expected_value"], item["reason"], now()))
+            for key, agent in (("repository_analysis", "repository_analyst"),
+                               ("risk_compliance", "risk_compliance_agent"),
+                               ("solution_plan", "solution_planner")):
+                if item.get(key) is not None:
+                    db.execute("""INSERT INTO agent_records VALUES(NULL,?,?,?,?)
+                      ON CONFLICT(external_id,agent) DO UPDATE SET
+                      payload=excluded.payload, created_at=excluded.created_at""",
+                      (item["external_id"], agent, json.dumps(item[key]), now()))
 
     def list_opportunities(self, limit=100):
         with self.connect() as db:
@@ -56,6 +68,31 @@ class Store:
         with self.connect() as db:
             return [dict(row) for row in db.execute("SELECT * FROM outcomes ORDER BY id")]
 
+    def performance_rows(self):
+        with self.connect() as db:
+            return [dict(row) for row in db.execute("""SELECT o.*, p.url, p.repository,
+              'unknown' language FROM outcomes o LEFT JOIN opportunities p
+              ON p.id=o.opportunity_id ORDER BY o.id""")]
+
+    def save_learning_proposal(self, proposal):
+        with self.connect() as db:
+            db.execute("INSERT INTO learning_proposals VALUES(NULL,?,?,?)",
+                       (json.dumps(proposal), proposal.get("status", "proposal_only"), now()))
+
+    def agent_activity(self):
+        with self.connect() as db:
+            records = {row["agent"]: row["count"] for row in db.execute(
+                "SELECT agent, COUNT(*) count FROM agent_records GROUP BY agent")}
+            scans = db.execute("SELECT COUNT(*) FROM audit_log WHERE event LIKE 'scout_%'").fetchone()[0]
+            proposals = db.execute("SELECT COUNT(*) FROM learning_proposals").fetchone()[0]
+            return {
+                "opportunity_scout": scans,
+                "repository_analyst": records.get("repository_analyst", 0),
+                "risk_compliance_agent": records.get("risk_compliance_agent", 0),
+                "solution_planner": records.get("solution_planner", 0),
+                "performance_learner": proposals,
+            }
+
     def stats(self):
         with self.connect() as db:
             row = db.execute("""SELECT COUNT(*) found,
@@ -63,9 +100,9 @@ class Store:
               SUM(status='REJECTED') rejected,
               COALESCE(SUM(expected_value),0) expected_value FROM opportunities""").fetchone()
             money = db.execute("SELECT COALESCE(SUM(income-cost),0) FROM outcomes").fetchone()[0]
-            return {**dict(row), "realized_income": round(money, 2)}
+            return {**dict(row), "realized_income": round(money, 2),
+                    "agent_activity": self.agent_activity()}
 
 
 def now():
     return datetime.now(timezone.utc).isoformat()
-
