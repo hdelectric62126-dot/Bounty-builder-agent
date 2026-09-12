@@ -20,6 +20,7 @@ from historical_experience import HistoricalExperienceCollector
 from delivery_reviewer import CheckEvidence, review_delivery
 from deep_deliberation import deliberate
 from store import Store
+from coding_gym import CodingGym
 
 DATA_DIR = os.getenv("DATA_DIR", "/data")
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -29,6 +30,20 @@ scout = OpportunityScout()
 performance_learner = PerformanceLearner()
 historian = HistoricalExperienceCollector(token=os.getenv("GITHUB_TOKEN"))
 scan_lock = threading.Lock()
+
+
+def execute_practice(files, profile):
+    url = os.getenv("SANDBOX_URL", "").rstrip("/")
+    token = os.getenv("SANDBOX_TOKEN", "")
+    if not url or not token:
+        return {"status": "ISOLATION_NOT_CONFIGURED", "network": "not_run"}
+    response = requests.post(f"{url}/jobs", json={"files": files, "profile": profile},
+        headers={"X-Sandbox-Token": token}, timeout=75)
+    response.raise_for_status()
+    return response.json()
+
+
+coding_gym = CodingGym(execute_practice)
 
 
 @asynccontextmanager
@@ -141,6 +156,21 @@ def worker():
         except Exception as exc:
             store.audit("history_failed", {"year": history_year, "error": type(exc).__name__,
                         "message": str(exc)[:300]})
+        if not store.stats()["approved"]:
+            rounds = max(1, min(int(os.getenv("PRACTICE_ROUNDS_PER_CYCLE", "5")), 20))
+            start = store.practice_stats()["drills"]
+            for offset in range(rounds):
+                try:
+                    result = coding_gym.run(start + offset)
+                    saved = store.save_practice_run(result)
+                    store.audit("coding_practice_completed", {
+                        "exercise_id": result["exercise_id"], "score": result["score"],
+                        "verified_pass": result["verified_pass"], "saved": saved,
+                        "practice_only": True,
+                    })
+                except Exception as exc:
+                    store.audit("coding_practice_failed", {"error": type(exc).__name__,
+                                "message": str(exc)[:300]})
         current_year = datetime.now(timezone.utc).year
         history_year = current_year - 19 if history_year >= current_year else history_year + 1
         time.sleep(int(os.getenv("SCAN_SECONDS", "21600")))
@@ -341,7 +371,10 @@ def dashboard():
     <div class='card'>Learning proposals<br><b>{activity['performance_learner']}</b></div>
     <div class='card'>Historical cases learned<br><b>{activity['historical_experience']}</b></div>
     <div class='card'>Delivery reviews<br><b>{activity['delivery_reviews']}</b></div>
-    <div class='card'>Deep deliberations<br><b>{activity['deep_deliberations']}</b></div></div>
+    <div class='card'>Deep deliberations<br><b>{activity['deep_deliberations']}</b></div>
+    <div class='card'>Practice drills<br><b>{activity['practice']['drills']}</b></div>
+    <div class='card'>Verified practice passes<br><b>{activity['practice']['verified_passes']}</b></div>
+    <div class='card'>Practice score<br><b>{activity['practice']['average_score']}</b></div></div>
     <table><thead><tr><th>Status</th><th>Score</th><th>Task</th><th>Repository</th><th>Reward</th><th>Expected value</th><th>License</th><th>Decision</th></tr></thead>
     <tbody>{rows or '<tr><td colspan=8>First scan is starting…</td></tr>'}</tbody></table>
     <p><a href='/work-queue'>Review deep-thinking work queue</a> · <a href='/audit'>View complete audit feed</a></p></body></html>"""
