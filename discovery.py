@@ -4,7 +4,9 @@ import os
 import re
 import requests
 from policy import evaluate_source, evaluate_text, license_allowed
-from risk_agent import assess
+from repository_analyst import RepositoryAnalyst
+from risk_compliance_agent import OpportunityRiskInput, evaluate_risk
+from solution_planner import create_solution_plan
 
 REWARD = re.compile(r"(?:\$|USD\s*)([0-9][0-9,]*(?:\.[0-9]{1,2})?)", re.I)
 
@@ -45,14 +47,29 @@ class GitHubDiscovery:
         reward = max([float(value.replace(',', '')) for value in money] or [0.0])
         labels = {label["name"].lower() for label in raw.get("labels", [])}
         tests = any(word in (raw.get("body") or "").lower() for word in ("test", "pytest", "unit test"))
-        decision = assess(reward=reward, success_probability=0.35, hours=8,
-            cash_cost=0, legal_risk=1, license_ok=licensing.allowed, tests_available=tests)
-        return {
+        analysis = RepositoryAnalyst().analyze(repository=repo_data, issue=raw).to_dict()
+        clarity = analysis["issue_clarity"]["score"]
+        payment_confidence = 0.7 if reward > 0 and "bounty" in labels else 0.6 if reward > 0 else 0.0
+        decision = evaluate_risk(OpportunityRiskInput(
+            reward=reward, success_probability=0.35, estimated_hours=8, cash_cost=0,
+            license_ok=licensing.allowed, terms_ok=source.allowed,
+            payment_confidence=payment_confidence,
+            scope_ambiguity=max(0, 10 - round(clarity / 10)), legal_risk=1,
+        ))
+        item = {
             "external_id": str(raw["id"]), "title": raw["title"], "url": raw["html_url"],
             "repository": repo, "reward": reward, "license": spdx or "UNKNOWN",
-            "status": "APPROVED" if decision.approved else "REJECTED",
-            "risk_score": decision.score, "expected_value": decision.expected_value,
-            "reason": decision.reason + ("" if licensing.allowed else f"; {licensing.reason}"),
-            "labels": sorted(labels),
+            "language": repo_data.get("language") or "UNKNOWN",
+            "status": decision.status, "risk_score": decision.score,
+            "expected_value": decision.expected_value,
+            "reason": ", ".join(decision.reason_codes), "labels": sorted(labels),
+            "repository_analysis": analysis,
+            "risk_compliance": decision.audit_record,
         }
-
+        if decision.approved and analysis["feasible"]:
+            item["solution_plan"] = create_solution_plan(item, {
+                "requirements": analysis["issue_clarity"]["evidence"],
+                "complexity": "medium", "unknowns": analysis["blockers"],
+                "test_commands": ["Run the repository's documented test suite"] if tests else [],
+            }).to_dict()
+        return item
