@@ -41,6 +41,7 @@ class GitHubDiscovery:
         if not repo_response.ok:
             return None
         repo_data = repo_response.json()
+        competition = self._competition(raw, repo)
         spdx = (repo_data.get("license") or {}).get("spdx_id")
         licensing = license_allowed(spdx)
         money = REWARD.findall(f"{raw.get('title','')} {raw.get('body') or ''}")
@@ -55,6 +56,9 @@ class GitHubDiscovery:
             license_ok=licensing.allowed, terms_ok=source.allowed,
             payment_confidence=payment_confidence,
             scope_ambiguity=max(0, 10 - round(clarity / 10)), legal_risk=1,
+            assigned=competition["assigned"],
+            competing_pull_requests=competition["linked_pull_requests"],
+            competition_data_complete=competition["timeline_complete"],
         ))
         item = {
             "external_id": str(raw["id"]), "title": raw["title"], "url": raw["html_url"],
@@ -63,6 +67,7 @@ class GitHubDiscovery:
             "status": decision.status, "risk_score": decision.score,
             "expected_value": decision.expected_value,
             "reason": ", ".join(decision.reason_codes), "labels": sorted(labels),
+            "competition": competition,
             "repository_analysis": analysis,
             "risk_compliance": decision.audit_record,
         }
@@ -73,3 +78,42 @@ class GitHubDiscovery:
                 "test_commands": ["Run the repository's documented test suite"] if tests else [],
             }).to_dict()
         return item
+
+    def _competition(self, raw, repo):
+        """Return bounded, fail-closed evidence about ownership and competing PRs."""
+        assignees = raw.get("assignees") or []
+        if raw.get("assignee") and not assignees:
+            assignees = [raw["assignee"]]
+
+        issue_number = raw.get("number")
+        linked_prs = set()
+        timeline_complete = False
+        if issue_number:
+            url = f"https://api.github.com/repos/{repo}/issues/{issue_number}/timeline"
+            try:
+                response = requests.get(
+                    url,
+                    params={"per_page": 100},
+                    headers={**self.headers, "Accept": "application/vnd.github+json"},
+                    timeout=15,
+                )
+                if response.ok:
+                    timeline_complete = True
+                    for event in response.json():
+                        source_issue = ((event.get("source") or {}).get("issue") or {})
+                        pull_request = source_issue.get("pull_request") or {}
+                        pr_url = pull_request.get("url") or pull_request.get("html_url")
+                        if event.get("event") == "cross-referenced" and pr_url:
+                            linked_prs.add(pr_url)
+            except (requests.RequestException, TypeError, ValueError):
+                pass
+
+        return {
+            "assigned": bool(assignees),
+            "assignees": sorted({
+                str(value.get("login")) for value in assignees
+                if isinstance(value, dict) and value.get("login")
+            }),
+            "linked_pull_requests": len(linked_prs),
+            "timeline_complete": timeline_complete,
+        }

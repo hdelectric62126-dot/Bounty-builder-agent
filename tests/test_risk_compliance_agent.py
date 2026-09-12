@@ -69,6 +69,25 @@ class RiskComplianceAgentTests(unittest.TestCase):
         self.assertFalse(result.approved)
         self.assertIn("HARD_STOP_INVALID_SUCCESS_PROBABILITY", result.reason_codes)
 
+    def test_assigned_work_is_rejected(self):
+        result = evaluate_risk(valid_item(assigned=True))
+        self.assertFalse(result.approved)
+        self.assertIn("HARD_STOP_ALREADY_ASSIGNED", result.reason_codes)
+
+    def test_overcompeted_work_is_rejected(self):
+        result = evaluate_risk(valid_item(competing_pull_requests=3))
+        self.assertFalse(result.approved)
+        self.assertIn("HARD_STOP_OVERCOMPETED", result.reason_codes)
+
+    def test_two_competing_pull_requests_remain_eligible(self):
+        result = evaluate_risk(valid_item(competing_pull_requests=2))
+        self.assertTrue(result.approved)
+
+    def test_unverified_competition_fails_closed(self):
+        result = evaluate_risk(valid_item(competition_data_complete=False))
+        self.assertFalse(result.approved)
+        self.assertIn("HARD_STOP_COMPETITION_UNVERIFIED", result.reason_codes)
+
 
 if __name__ == "__main__":
     unittest.main()

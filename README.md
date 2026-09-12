@@ -48,6 +48,7 @@ A real-world, approval-gated agent that discovers public open-source coding boun
 
 - Aggressive discovery is allowed; unsafe execution is not.
 - Unknown or non-allowlisted licenses are rejected.
+- Already-assigned issues and issues with more than two linked competing pull requests are rejected.
 - Security exploitation, credential work, malware, phishing, and authentication bypass tasks are rejected.
 - No public submission, contract acceptance, spending, or financial action occurs automatically.
 - Learning changes are proposals until Daniel explicitly approves promotion.

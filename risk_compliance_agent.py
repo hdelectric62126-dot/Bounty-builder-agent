@@ -23,6 +23,9 @@ class OpportunityRiskInput:
     payment_confidence: float = 0.0
     scope_ambiguity: int = 10
     legal_risk: int = 10
+    assigned: bool = False
+    competing_pull_requests: int = 0
+    competition_data_complete: bool = True
 
 
 @dataclass(frozen=True)
@@ -44,6 +47,7 @@ def evaluate_risk(
     min_payment_confidence: float = 0.60,
     max_scope_ambiguity: int = 6,
     max_legal_risk: int = 2,
+    max_competing_pull_requests: int = 2,
     min_expected_value: float = 1.0,
     min_score: int = 55,
 ) -> ComplianceDecision:
@@ -55,6 +59,7 @@ def evaluate_risk(
         "min_payment_confidence": min_payment_confidence,
         "max_scope_ambiguity": max_scope_ambiguity,
         "max_legal_risk": max_legal_risk,
+        "max_competing_pull_requests": max_competing_pull_requests,
         "min_expected_value": min_expected_value,
         "min_score": min_score,
     }
@@ -87,6 +92,14 @@ def evaluate_risk(
         reasons.append("HARD_STOP_INVALID_LEGAL_RISK")
     elif item.legal_risk > max_legal_risk:
         reasons.append("HARD_STOP_LEGAL_RISK")
+    if item.assigned:
+        reasons.append("HARD_STOP_ALREADY_ASSIGNED")
+    if not item.competition_data_complete:
+        reasons.append("HARD_STOP_COMPETITION_UNVERIFIED")
+    if item.competing_pull_requests < 0:
+        reasons.append("HARD_STOP_INVALID_COMPETING_PULL_REQUESTS")
+    elif item.competing_pull_requests > max_competing_pull_requests:
+        reasons.append("HARD_STOP_OVERCOMPETED")
 
     valid_probabilities = (
         0 <= item.success_probability <= 1
