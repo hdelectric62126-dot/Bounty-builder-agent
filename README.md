@@ -16,6 +16,16 @@ Risk & Compliance, and Solution Planner records, plus a complete audit feed. Ver
 income, costs, and hours can be recorded through the authenticated `POST /outcomes`
 endpoint so projected value never gets confused with money actually earned.
 
+## Experience and delivery intelligence
+
+- A rolling twenty-year collector samples closed public software work one year at a
+  time and stores derived metadata such as category, cycle time, discussion volume,
+  and completion reason. It does not copy source code or issue bodies.
+- The delivery reviewer requires evidence for tests, linting, security review, and
+  acceptance criteria. Failed or missing checks block delivery.
+- Even a fully passing review stops at `AWAITING_DANIEL_APPROVAL`; client handoff is
+  never automatic.
+
 A real-world, approval-gated agent that discovers public open-source coding bounties, verifies repository licenses, estimates risk-adjusted value, stores an audit trail, and learns from measured outcomes.
 
 ## Safety contract
