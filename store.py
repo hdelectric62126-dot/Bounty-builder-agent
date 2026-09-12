@@ -33,6 +33,10 @@ CREATE TABLE IF NOT EXISTS work_reviews (
  id INTEGER PRIMARY KEY AUTOINCREMENT, opportunity_id INTEGER, evidence_id TEXT UNIQUE,
  decision TEXT, payload TEXT, created_at TEXT
 );
+CREATE TABLE IF NOT EXISTS work_queue (
+ id INTEGER PRIMARY KEY AUTOINCREMENT, opportunity_id INTEGER UNIQUE,
+ stage TEXT, deliberation TEXT, created_at TEXT, updated_at TEXT
+);
 """
 
 
@@ -87,6 +91,12 @@ class Store:
             rows = db.execute("""SELECT agent, payload, created_at FROM agent_records
               WHERE external_id=? ORDER BY agent""", (external_id,))
             return [{**dict(row), "payload": json.loads(row["payload"])} for row in rows]
+
+    def agent_record_map(self, external_id):
+        return {row["agent"].replace("repository_analyst", "repository_analysis")
+                .replace("risk_compliance_agent", "risk_compliance")
+                .replace("solution_planner", "solution_plan"): row["payload"]
+                for row in self.agent_records_for(external_id)}
 
     def recent_audit(self, limit=100):
         with self.connect() as db:
@@ -150,6 +160,23 @@ class Store:
                  json.dumps(payload), now()))
         self.audit("delivery_reviewed", {"opportunity_id": opportunity_id, **decision})
 
+    def enqueue_work(self, opportunity_id, deliberation):
+        stage = ("AWAITING_DANIEL_APPROVAL" if deliberation["recommendation"] ==
+                 "QUEUE_FOR_DANIEL_APPROVAL" else "HOLD_FOR_MORE_EVIDENCE")
+        with self.connect() as db:
+            db.execute("""INSERT INTO work_queue VALUES(NULL,?,?,?,?,?)
+              ON CONFLICT(opportunity_id) DO UPDATE SET stage=excluded.stage,
+              deliberation=excluded.deliberation, updated_at=excluded.updated_at""",
+              (opportunity_id, stage, json.dumps(deliberation), now(), now()))
+        return stage
+
+    def work_queue(self, limit=100):
+        with self.connect() as db:
+            rows = db.execute("""SELECT q.*, p.title, p.repository, p.reward,
+              p.expected_value, p.url FROM work_queue q JOIN opportunities p
+              ON p.id=q.opportunity_id ORDER BY p.expected_value DESC LIMIT ?""", (limit,))
+            return [{**dict(row), "deliberation": json.loads(row["deliberation"])} for row in rows]
+
     def agent_activity(self):
         with self.connect() as db:
             records = {row["agent"]: row["count"] for row in db.execute(
@@ -164,6 +191,7 @@ class Store:
                 "performance_learner": proposals,
                 "historical_experience": self.experience_stats()["cases"],
                 "delivery_reviews": db.execute("SELECT COUNT(*) FROM work_reviews").fetchone()[0],
+                "deep_deliberations": db.execute("SELECT COUNT(*) FROM work_queue").fetchone()[0],
             }
 
     def stats(self):
