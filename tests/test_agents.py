@@ -5,6 +5,7 @@ from pathlib import Path
 from learner import Learner
 from policy import evaluate_source, evaluate_text, license_allowed
 from risk_agent import assess
+import app
 
 
 class SafetyTests(unittest.TestCase):
@@ -49,7 +50,15 @@ class LearningTests(unittest.TestCase):
             with self.assertRaises(PermissionError):
                 agent.promote(proposal["challenger"], approved=False)
 
+    def test_admin_actions_fail_closed_without_secret(self):
+        previous = app.os.environ.pop("ADMIN_TOKEN", None)
+        try:
+            with self.assertRaises(Exception):
+                app.require_admin(None)
+        finally:
+            if previous is not None:
+                app.os.environ["ADMIN_TOKEN"] = previous
+
 
 if __name__ == "__main__":
     unittest.main()
-
