@@ -45,8 +45,12 @@ class Store:
 
     def save_opportunity(self, item):
         with self.connect() as db:
-            db.execute("""INSERT OR IGNORE INTO opportunities
-              VALUES(NULL,?,?,?,?,?,?,?,?,?,?,?)""", (
+            db.execute("""INSERT INTO opportunities VALUES(NULL,?,?,?,?,?,?,?,?,?,?,?)
+              ON CONFLICT(external_id) DO UPDATE SET title=excluded.title,
+              url=excluded.url, repository=excluded.repository, reward=excluded.reward,
+              license=excluded.license, status=excluded.status,
+              risk_score=excluded.risk_score, expected_value=excluded.expected_value,
+              reason=excluded.reason""", (
                 item["external_id"], item["title"], item["url"], item["repository"],
                 item["reward"], item["license"], item["status"], item["risk_score"],
                 item["expected_value"], item["reason"], now()))
@@ -63,6 +67,35 @@ class Store:
         with self.connect() as db:
             return [dict(row) for row in db.execute(
                 "SELECT * FROM opportunities ORDER BY risk_score DESC, id DESC LIMIT ?", (limit,))]
+
+    def get_opportunity(self, opportunity_id):
+        with self.connect() as db:
+            row = db.execute("SELECT * FROM opportunities WHERE id=?", (opportunity_id,)).fetchone()
+            return dict(row) if row else None
+
+    def agent_records_for(self, external_id):
+        with self.connect() as db:
+            rows = db.execute("""SELECT agent, payload, created_at FROM agent_records
+              WHERE external_id=? ORDER BY agent""", (external_id,))
+            return [{**dict(row), "payload": json.loads(row["payload"])} for row in rows]
+
+    def recent_audit(self, limit=100):
+        with self.connect() as db:
+            rows = db.execute("SELECT * FROM audit_log ORDER BY id DESC LIMIT ?", (limit,))
+            return [{**dict(row), "details": json.loads(row["details"])} for row in rows]
+
+    def record_outcome(self, opportunity_id, result, income, cost, hours, notes):
+        with self.connect() as db:
+            exists = db.execute("SELECT 1 FROM opportunities WHERE id=?", (opportunity_id,)).fetchone()
+            if not exists:
+                raise KeyError("opportunity not found")
+            cursor = db.execute("INSERT INTO outcomes VALUES(NULL,?,?,?,?,?,?,?)",
+                (opportunity_id, result, income, cost, hours, now(), notes))
+            outcome_id = cursor.lastrowid
+        self.audit("outcome_recorded", {"outcome_id": outcome_id,
+                   "opportunity_id": opportunity_id, "result": result,
+                   "income": income, "cost": cost, "hours": hours})
+        return outcome_id
 
     def outcomes(self):
         with self.connect() as db:
