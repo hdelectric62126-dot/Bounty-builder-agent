@@ -102,6 +102,11 @@ def scan_once():
         items = report.opportunities
         for item in items:
             store.save_opportunity(item)
+        stale_rejected = 0
+        if report.query_errors == 0:
+            stale_rejected = store.reject_unseen_approvals(
+                item["external_id"] for item in items
+            )
         for saved in (x for x in store.list_opportunities(200) if x["status"] == "APPROVED"):
             thought = deliberate(saved, store.agent_record_map(saved["external_id"]),
                                  store.experience_stats()).to_dict()
@@ -114,7 +119,8 @@ def scan_once():
         store.save_learning_proposal(performance)
         store.audit("scout_completed", {"items": len(items), "fetched": report.fetched,
                     "duplicates": report.duplicates, "rejected": report.rejected,
-                    "query_errors": report.query_errors, "learning": proposal})
+                    "query_errors": report.query_errors, "stale_rejected": stale_rejected,
+                    "learning": proposal})
         return {"status": "complete", "items": len(items)}
     except Exception as exc:
         store.audit("scan_failed", {"error": type(exc).__name__, "message": str(exc)[:300]})
