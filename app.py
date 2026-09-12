@@ -7,15 +7,17 @@ from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
-from discovery import GitHubDiscovery
 from learner import Learner
+from opportunity_scout import OpportunityScout
+from performance_learner import PerformanceLearner
 from store import Store
 
 DATA_DIR = os.getenv("DATA_DIR", "/data")
 os.makedirs(DATA_DIR, exist_ok=True)
 store = Store(os.path.join(DATA_DIR, "bounty_builder.db"))
 learner = Learner(os.path.join(DATA_DIR, "ranking_weights.json"))
-discovery = GitHubDiscovery()
+scout = OpportunityScout()
+performance_learner = PerformanceLearner()
 app = FastAPI(title="Bounty Builder Agent", version="1.0.0")
 
 
@@ -31,11 +33,16 @@ def require_admin(x_admin_token: str | None):
 
 def scan_once():
     try:
-        items = discovery.scan()
+        report = scout.scan()
+        items = report.opportunities
         for item in items:
             store.save_opportunity(item)
         proposal = learner.propose(store.outcomes())
-        store.audit("scan_completed", {"items": len(items), "learning": proposal})
+        performance = performance_learner.propose(store.performance_rows())
+        store.save_learning_proposal(performance)
+        store.audit("scout_completed", {"items": len(items), "fetched": report.fetched,
+                    "duplicates": report.duplicates, "rejected": report.rejected,
+                    "query_errors": report.query_errors, "learning": proposal})
     except Exception as exc:
         store.audit("scan_failed", {"error": type(exc).__name__, "message": str(exc)[:300]})
 
@@ -56,6 +63,11 @@ def health():
     return {"status": "ok", "mode": "approval_gated_real_world", "stats": store.stats()}
 
 
+@app.get("/api/agents")
+def agents():
+    return {"status": "ok", "agents": store.agent_activity()}
+
+
 @app.post("/scan")
 def scan_now(x_admin_token: str | None = Header(default=None)):
     require_admin(x_admin_token)
@@ -74,6 +86,7 @@ def promote(body: Promotion, x_admin_token: str | None = Header(default=None)):
 @app.get("/", response_class=HTMLResponse)
 def dashboard():
     stats = store.stats()
+    activity = stats["agent_activity"]
     rows = "".join(f"""<tr><td>{escape(x['status'])}</td><td>{x['risk_score']}</td>
       <td><a href='{escape(x['url'])}'>{escape(x['title'])}</a></td>
       <td>{escape(x['repository'])}</td><td>${x['reward']:.2f}</td>
@@ -89,6 +102,12 @@ def dashboard():
     <div class='card'>Approved for work<br><b>{stats['approved'] or 0}</b></div>
     <div class='card'>Rejected by risk<br><b>{stats['rejected'] or 0}</b></div>
     <div class='card'>Realized income<br><b>${stats['realized_income']:.2f}</b></div></div>
+    <h2>Agent team activity</h2><div class='cards'>
+    <div class='card'>Scout scans<br><b>{activity['opportunity_scout']}</b></div>
+    <div class='card'>Repository analyses<br><b>{activity['repository_analyst']}</b></div>
+    <div class='card'>Risk decisions<br><b>{activity['risk_compliance_agent']}</b></div>
+    <div class='card'>Solution plans<br><b>{activity['solution_planner']}</b></div>
+    <div class='card'>Learning proposals<br><b>{activity['performance_learner']}</b></div></div>
     <table><thead><tr><th>Status</th><th>Score</th><th>Task</th><th>Repository</th><th>Reward</th><th>Expected value</th><th>License</th><th>Decision</th></tr></thead>
     <tbody>{rows or '<tr><td colspan=8>First scan is starting…</td></tr>'}</tbody></table></body></html>"""
 
