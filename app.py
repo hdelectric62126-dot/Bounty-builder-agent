@@ -3,11 +3,14 @@ import secrets
 import threading
 import time
 import json
+import hashlib
+import hmac
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from html import escape
-from fastapi import FastAPI, Header, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, Form, Header, HTTPException, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
+import requests
 from pydantic import BaseModel, Field
 
 from learner import Learner
@@ -64,10 +67,31 @@ class WorkReview(BaseModel):
     changed_files: list[str] = Field(max_length=200)
 
 
+class ClientQuote(BaseModel):
+    amount_cents: int = Field(ge=100, le=10_000_000)
+    description: str = Field(min_length=3, max_length=500)
+
+
 def require_admin(x_admin_token: str | None):
     expected = os.getenv("ADMIN_TOKEN", "")
     if not expected or not x_admin_token or not secrets.compare_digest(expected, x_admin_token):
         raise HTTPException(403, "authenticated Daniel approval is required")
+
+
+def verify_stripe_signature(payload: bytes, signature: str, secret: str) -> bool:
+    parts = {}
+    for item in signature.split(","):
+        key, _, value = item.partition("=")
+        parts.setdefault(key, []).append(value)
+    try:
+        timestamp = int(parts["t"][0])
+    except (KeyError, ValueError):
+        return False
+    if abs(int(time.time()) - timestamp) > 300:
+        return False
+    signed = str(timestamp).encode() + b"." + payload
+    expected = hmac.new(secret.encode(), signed, hashlib.sha256).hexdigest()
+    return any(hmac.compare_digest(expected, value) for value in parts.get("v1", []))
 
 
 def scan_once():
@@ -183,6 +207,106 @@ def promote(body: Promotion, x_admin_token: str | None = Header(default=None)):
     return {"status": "promoted", "weights": result}
 
 
+@app.get("/hire", response_class=HTMLResponse)
+def hire_page():
+    return """<!doctype html><html><head><meta name='viewport' content='width=device-width'>
+    <title>Hire Bounty Builder</title><style>body{font-family:system-ui;background:#07111f;color:#eef;padding:24px;max-width:720px;margin:auto}input,textarea{box-sizing:border-box;width:100%;padding:12px;margin:6px 0 16px;border-radius:8px;border:1px solid #49627f}button{padding:12px 18px;background:#62d9ff;border:0;border-radius:8px;font-weight:700}</style></head><body>
+    <h1>Request a software project</h1><p>Describe the work. Daniel reviews every scope and price before payment is enabled.</p>
+    <form method='post' action='/client-requests'><label>Name<input name='name' required maxlength='100'></label>
+    <label>Email<input name='email' type='email' required maxlength='254'></label>
+    <label>Project details<textarea name='project' required minlength='20' maxlength='5000' rows='10'></textarea></label>
+    <label>Budget or range<input name='budget' maxlength='100'></label><button type='submit'>Send project request</button></form></body></html>"""
+
+
+@app.post("/client-requests")
+def create_client_request(name: str = Form(min_length=2, max_length=100),
+                          email: str = Form(min_length=5, max_length=254),
+                          project: str = Form(min_length=20, max_length=5000),
+                          budget: str = Form(default="", max_length=100)):
+    request_id = store.create_client_request(name.strip(), email.strip(), project.strip(), budget.strip())
+    return RedirectResponse(f"/client-requests/{request_id}/received", status_code=303)
+
+
+@app.get("/client-requests/{request_id}/received", response_class=HTMLResponse)
+def client_request_received(request_id: int):
+    item = store.get_client_request(request_id)
+    if not item:
+        raise HTTPException(404, "client request not found")
+    return """<!doctype html><html><head><meta name='viewport' content='width=device-width'><title>Request received</title></head>
+    <body style='font-family:system-ui;max-width:720px;margin:40px auto;padding:20px'><h1>Request received</h1>
+    <p>Daniel will review the scope and price. You will receive a secure payment link only after approval.</p></body></html>"""
+
+
+@app.get("/api/client-requests")
+def client_requests(x_admin_token: str | None = Header(default=None)):
+    require_admin(x_admin_token)
+    return {"requests": store.list_client_requests()}
+
+
+@app.post("/api/client-requests/{request_id}/quote")
+def quote_client_request(request_id: int, body: ClientQuote,
+                         x_admin_token: str | None = Header(default=None)):
+    require_admin(x_admin_token)
+    try:
+        store.quote_client_request(request_id, body.amount_cents, body.description.strip())
+    except KeyError:
+        raise HTTPException(404, "client request not found")
+    return {"status": "quoted", "client_request_id": request_id}
+
+
+@app.post("/api/client-requests/{request_id}/checkout")
+def create_checkout(request_id: int, request: Request,
+                    x_admin_token: str | None = Header(default=None)):
+    require_admin(x_admin_token)
+    item = store.get_client_request(request_id)
+    if not item:
+        raise HTTPException(404, "client request not found")
+    if item["status"] != "QUOTED" or not item["quote_cents"]:
+        raise HTTPException(409, "Daniel must approve a quote before checkout")
+    secret = os.getenv("STRIPE_SECRET_KEY", "")
+    if not secret:
+        raise HTTPException(503, "Stripe is not configured")
+    base = str(request.base_url).rstrip("/")
+    response = requests.post("https://api.stripe.com/v1/checkout/sessions",
+        auth=(secret, ""), timeout=20, data={
+          "mode": "payment", "customer_email": item["email"],
+          "line_items[0][price_data][currency]": "usd",
+          "line_items[0][price_data][product_data][name]": item["quote_description"],
+          "line_items[0][price_data][unit_amount]": item["quote_cents"],
+          "line_items[0][quantity]": 1,
+          "metadata[client_request_id]": request_id,
+          "success_url": f"{base}/payment/success",
+          "cancel_url": f"{base}/payment/cancelled"})
+    if response.status_code >= 400:
+        raise HTTPException(502, "Stripe rejected checkout creation")
+    session = response.json()
+    store.set_checkout_session(request_id, session["id"])
+    return {"status": "checkout_ready", "url": session["url"]}
+
+
+@app.post("/stripe/webhook")
+async def stripe_webhook(request: Request, stripe_signature: str = Header(default="")):
+    payload = await request.body()
+    secret = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+    if not secret or not verify_stripe_signature(payload, stripe_signature, secret):
+        raise HTTPException(400, "invalid Stripe signature")
+    event = json.loads(payload)
+    if event.get("type") == "checkout.session.completed":
+        session = event.get("data", {}).get("object", {})
+        store.mark_client_request_paid(session.get("id", ""), session.get("payment_status", "paid"))
+    return {"received": True}
+
+
+@app.get("/payment/success", response_class=HTMLResponse)
+def payment_success():
+    return "<h1>Payment received</h1><p>Your project is now queued for work.</p>"
+
+
+@app.get("/payment/cancelled", response_class=HTMLResponse)
+def payment_cancelled():
+    return "<h1>Payment cancelled</h1><p>No charge was completed.</p>"
+
+
 @app.get("/", response_class=HTMLResponse)
 def dashboard():
     stats = store.stats()
@@ -198,6 +322,7 @@ def dashboard():
     table{{width:100%;border-collapse:collapse;margin-top:20px}}td,th{{padding:9px;border-bottom:1px solid #29405e;text-align:left}}
     a{{color:#62d9ff}}.warning{{color:#ffcf66}}</style></head><body>
     <h1>Bounty Builder Agent</h1><p class='warning'>Aggressive discovery. Licensed code only. Daniel approves every public submission and paid action.</p>
+    <p><a href='/hire'>Client project request form</a></p>
     <div class='cards'><div class='card'>Found<br><b>{stats['found']}</b></div>
     <div class='card'>Approved for work<br><b>{stats['approved'] or 0}</b></div>
     <div class='card'>Rejected by risk<br><b>{stats['rejected'] or 0}</b></div>

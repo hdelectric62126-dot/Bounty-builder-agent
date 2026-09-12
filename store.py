@@ -37,6 +37,11 @@ CREATE TABLE IF NOT EXISTS work_queue (
  id INTEGER PRIMARY KEY AUTOINCREMENT, opportunity_id INTEGER UNIQUE,
  stage TEXT, deliberation TEXT, created_at TEXT, updated_at TEXT
 );
+CREATE TABLE IF NOT EXISTS client_requests (
+ id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, email TEXT, project TEXT,
+ budget TEXT, status TEXT, quote_cents INTEGER, quote_description TEXT,
+ stripe_session_id TEXT UNIQUE, payment_status TEXT, created_at TEXT, updated_at TEXT
+);
 """
 
 
@@ -203,6 +208,56 @@ class Store:
             money = db.execute("SELECT COALESCE(SUM(income-cost),0) FROM outcomes").fetchone()[0]
             return {**dict(row), "realized_income": round(money, 2),
                     "agent_activity": self.agent_activity()}
+
+    def create_client_request(self, name, email, project, budget):
+        timestamp = now()
+        with self.connect() as db:
+            cursor = db.execute("""INSERT INTO client_requests
+              (name,email,project,budget,status,payment_status,created_at,updated_at)
+              VALUES(?,?,?,?,?,?,?,?)""",
+              (name, email, project, budget, "NEW", "UNPAID", timestamp, timestamp))
+            request_id = cursor.lastrowid
+        self.audit("client_request_received", {"client_request_id": request_id})
+        return request_id
+
+    def get_client_request(self, request_id):
+        with self.connect() as db:
+            row = db.execute("SELECT * FROM client_requests WHERE id=?", (request_id,)).fetchone()
+            return dict(row) if row else None
+
+    def list_client_requests(self, limit=100):
+        with self.connect() as db:
+            return [dict(row) for row in db.execute(
+                "SELECT * FROM client_requests ORDER BY id DESC LIMIT ?", (limit,))]
+
+    def quote_client_request(self, request_id, amount_cents, description):
+        with self.connect() as db:
+            cursor = db.execute("""UPDATE client_requests SET status='QUOTED',
+              quote_cents=?, quote_description=?, updated_at=? WHERE id=?""",
+              (amount_cents, description, now(), request_id))
+            if not cursor.rowcount:
+                raise KeyError("client request not found")
+        self.audit("client_quote_approved", {"client_request_id": request_id,
+                   "amount_cents": amount_cents})
+
+    def set_checkout_session(self, request_id, session_id):
+        with self.connect() as db:
+            db.execute("""UPDATE client_requests SET stripe_session_id=?,
+              status='CHECKOUT_READY', updated_at=? WHERE id=?""",
+              (session_id, now(), request_id))
+
+    def mark_client_request_paid(self, session_id, payment_status):
+        with self.connect() as db:
+            row = db.execute("SELECT id FROM client_requests WHERE stripe_session_id=?",
+                             (session_id,)).fetchone()
+            if not row:
+                return None
+            request_id = row["id"]
+            db.execute("""UPDATE client_requests SET payment_status=?, status='PAID',
+              updated_at=? WHERE id=?""", (payment_status, now(), request_id))
+        self.audit("client_payment_confirmed", {"client_request_id": request_id,
+                   "stripe_session_id": session_id})
+        return request_id
 
 
 def now():
