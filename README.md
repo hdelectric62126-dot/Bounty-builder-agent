@@ -25,6 +25,9 @@ endpoint so projected value never gets confused with money actually earned.
   acceptance criteria. Failed or missing checks block delivery.
 - Even a fully passing review stops at `AWAITING_DANIEL_APPROVAL`; client handoff is
   never automatic.
+- When no bounty is approved, the coding gym runs bounded fail-then-fix drills in
+  the isolated workspace. It records test evidence, scores, and lessons—not source
+  code—and never presents practice as paid client experience.
 
 ## Hardened isolated workspace
 
