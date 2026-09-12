@@ -42,6 +42,11 @@ CREATE TABLE IF NOT EXISTS client_requests (
  budget TEXT, status TEXT, quote_cents INTEGER, quote_description TEXT,
  stripe_session_id TEXT UNIQUE, payment_status TEXT, created_at TEXT, updated_at TEXT
 );
+CREATE TABLE IF NOT EXISTS practice_runs (
+ id INTEGER PRIMARY KEY AUTOINCREMENT, exercise_id TEXT, category TEXT,
+ difficulty INTEGER, score INTEGER, verified_pass INTEGER, evidence_id TEXT UNIQUE,
+ lesson TEXT, result TEXT, created_at TEXT
+);
 """
 
 
@@ -80,6 +85,24 @@ class Store:
                       ON CONFLICT(external_id,agent) DO UPDATE SET
                       payload=excluded.payload, created_at=excluded.created_at""",
                       (item["external_id"], agent, json.dumps(item[key]), now()))
+
+    def save_practice_run(self, result):
+        with self.connect() as db:
+            cursor = db.execute("""INSERT OR IGNORE INTO practice_runs
+              VALUES(NULL,?,?,?,?,?,?,?,?,?)""", (
+                result["exercise_id"], result["category"], result["difficulty"],
+                result["score"], int(result["verified_pass"]), result["evidence_id"],
+                result["lesson"], json.dumps(result), now(),
+            ))
+        return cursor.rowcount
+
+    def practice_stats(self):
+        with self.connect() as db:
+            row = db.execute("""SELECT COUNT(*) drills,
+              COALESCE(SUM(verified_pass),0) verified_passes,
+              COALESCE(ROUND(AVG(score),1),0) average_score,
+              COALESCE(MAX(difficulty),0) max_difficulty FROM practice_runs""").fetchone()
+            return dict(row)
 
     def reject_unseen_approvals(self, seen_external_ids):
         """Remove stale approvals after a complete scan without deleting history."""
@@ -215,6 +238,7 @@ class Store:
                 "historical_experience": self.experience_stats()["cases"],
                 "delivery_reviews": db.execute("SELECT COUNT(*) FROM work_reviews").fetchone()[0],
                 "deep_deliberations": db.execute("SELECT COUNT(*) FROM work_queue").fetchone()[0],
+                "practice": self.practice_stats(),
             }
 
     def stats(self):
