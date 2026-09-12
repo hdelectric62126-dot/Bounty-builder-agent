@@ -1,8 +1,9 @@
 import os
+import secrets
 import threading
 import time
 from html import escape
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
@@ -20,7 +21,12 @@ app = FastAPI(title="Bounty Builder Agent", version="1.0.0")
 
 class Promotion(BaseModel):
     challenger: dict
-    daniel_approved: bool = False
+
+
+def require_admin(x_admin_token: str | None):
+    expected = os.getenv("ADMIN_TOKEN", "")
+    if not expected or not x_admin_token or not secrets.compare_digest(expected, x_admin_token):
+        raise HTTPException(403, "authenticated Daniel approval is required")
 
 
 def scan_once():
@@ -51,15 +57,15 @@ def health():
 
 
 @app.post("/scan")
-def scan_now():
+def scan_now(x_admin_token: str | None = Header(default=None)):
+    require_admin(x_admin_token)
     scan_once()
     return {"status": "complete", "stats": store.stats()}
 
 
 @app.post("/learning/promote")
-def promote(body: Promotion):
-    if not body.daniel_approved:
-        raise HTTPException(403, "Daniel's explicit approval is required")
+def promote(body: Promotion, x_admin_token: str | None = Header(default=None)):
+    require_admin(x_admin_token)
     result = learner.promote(body.challenger, approved=True)
     store.audit("learning_promoted", {"weights": result})
     return {"status": "promoted", "weights": result}
@@ -90,4 +96,3 @@ def dashboard():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "8000")))
-
