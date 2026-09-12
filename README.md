@@ -35,6 +35,13 @@ memory, processes, files, runtime, and output. The service has no public domain 
 receives no trading, GitHub, client, or deployment credentials. If kernel isolation
 is unavailable, execution fails closed.
 
+## Deep deliberation queue
+
+Approved opportunities pass through five recorded reviews: requirements,
+repository feasibility, financial/compliance risk, implementation critique, and
+historical calibration. Only unanimous evidence places work in Daniel's approval
+queue; incomplete cases remain on hold instead of being rushed.
+
 A real-world, approval-gated agent that discovers public open-source coding bounties, verifies repository licenses, estimates risk-adjusted value, stores an audit trail, and learns from measured outcomes.
 
 ## Safety contract
