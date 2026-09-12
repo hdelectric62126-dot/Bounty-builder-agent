@@ -81,6 +81,24 @@ class Store:
                       payload=excluded.payload, created_at=excluded.created_at""",
                       (item["external_id"], agent, json.dumps(item[key]), now()))
 
+    def reject_unseen_approvals(self, seen_external_ids):
+        """Remove stale approvals after a complete scan without deleting history."""
+        seen = {str(value) for value in seen_external_ids}
+        with self.connect() as db:
+            rows = db.execute(
+                "SELECT external_id FROM opportunities WHERE status='APPROVED'"
+            ).fetchall()
+            stale = [row["external_id"] for row in rows if row["external_id"] not in seen]
+            if stale:
+                placeholders = ",".join("?" for _ in stale)
+                db.execute(
+                    f"""UPDATE opportunities SET status='REJECTED', risk_score=0,
+                    reason='REJECT_NOT_IN_LATEST_COMPLETE_SCAN'
+                    WHERE external_id IN ({placeholders})""",
+                    stale,
+                )
+        return len(stale)
+
     def list_opportunities(self, limit=100):
         with self.connect() as db:
             return [dict(row) for row in db.execute(
