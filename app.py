@@ -4,6 +4,7 @@ import threading
 import time
 import json
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from html import escape
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import HTMLResponse
@@ -12,6 +13,8 @@ from pydantic import BaseModel, Field
 from learner import Learner
 from opportunity_scout import OpportunityScout
 from performance_learner import PerformanceLearner
+from historical_experience import HistoricalExperienceCollector
+from delivery_reviewer import CheckEvidence, review_delivery
 from store import Store
 
 DATA_DIR = os.getenv("DATA_DIR", "/data")
@@ -20,6 +23,7 @@ store = Store(os.path.join(DATA_DIR, "bounty_builder.db"))
 learner = Learner(os.path.join(DATA_DIR, "ranking_weights.json"))
 scout = OpportunityScout()
 performance_learner = PerformanceLearner()
+historian = HistoricalExperienceCollector(token=os.getenv("GITHUB_TOKEN"))
 scan_lock = threading.Lock()
 
 
@@ -43,6 +47,20 @@ class Outcome(BaseModel):
     cost: float = Field(default=0, ge=0, le=1_000_000)
     hours: float = Field(default=0, ge=0, le=10_000)
     notes: str = Field(default="", max_length=2000)
+
+
+class Check(BaseModel):
+    name: str
+    passed: bool
+    command: str = Field(max_length=500)
+    summary: str = Field(max_length=2000)
+
+
+class WorkReview(BaseModel):
+    opportunity_id: int = Field(gt=0)
+    acceptance_criteria: list[str] = Field(max_length=50)
+    checks: list[Check] = Field(max_length=20)
+    changed_files: list[str] = Field(max_length=200)
 
 
 def require_admin(x_admin_token: str | None):
@@ -74,8 +92,19 @@ def scan_once():
 
 
 def worker():
+    history_year = datetime.now(timezone.utc).year - 19
     while True:
         scan_once()
+        try:
+            report = historian.collect_year(history_year)
+            saved = store.save_experience(report["cases"])
+            store.audit("history_sampled", {"year": history_year, "sampled": report["sampled"],
+                        "saved": saved, "code_copied": False})
+        except Exception as exc:
+            store.audit("history_failed", {"year": history_year, "error": type(exc).__name__,
+                        "message": str(exc)[:300]})
+        current_year = datetime.now(timezone.utc).year
+        history_year = current_year - 19 if history_year >= current_year else history_year + 1
         time.sleep(int(os.getenv("SCAN_SECONDS", "21600")))
 
 
@@ -86,7 +115,8 @@ def health():
 
 @app.get("/api/agents")
 def agents():
-    return {"status": "ok", "agents": store.agent_activity()}
+    return {"status": "ok", "agents": store.agent_activity(),
+            "experience": store.experience_stats()}
 
 
 @app.get("/api/audit")
@@ -118,6 +148,18 @@ def record_outcome(body: Outcome, x_admin_token: str | None = Header(default=Non
     except KeyError:
         raise HTTPException(404, "opportunity not found")
     return {"status": "recorded", "outcome_id": outcome_id, "stats": store.stats()}
+
+
+@app.post("/reviews")
+def record_review(body: WorkReview, x_admin_token: str | None = Header(default=None)):
+    require_admin(x_admin_token)
+    checks = [CheckEvidence(**item.model_dump()) for item in body.checks]
+    decision = review_delivery(body.acceptance_criteria, checks, body.changed_files).to_dict()
+    try:
+        store.save_work_review(body.opportunity_id, decision, body.model_dump())
+    except KeyError:
+        raise HTTPException(404, "opportunity not found")
+    return {"status": "reviewed", "decision": decision}
 
 
 @app.post("/learning/promote")
@@ -152,7 +194,9 @@ def dashboard():
     <div class='card'>Repository analyses<br><b>{activity['repository_analyst']}</b></div>
     <div class='card'>Risk decisions<br><b>{activity['risk_compliance_agent']}</b></div>
     <div class='card'>Solution plans<br><b>{activity['solution_planner']}</b></div>
-    <div class='card'>Learning proposals<br><b>{activity['performance_learner']}</b></div></div>
+    <div class='card'>Learning proposals<br><b>{activity['performance_learner']}</b></div>
+    <div class='card'>Historical cases learned<br><b>{activity['historical_experience']}</b></div>
+    <div class='card'>Delivery reviews<br><b>{activity['delivery_reviews']}</b></div></div>
     <table><thead><tr><th>Status</th><th>Score</th><th>Task</th><th>Repository</th><th>Reward</th><th>Expected value</th><th>License</th><th>Decision</th></tr></thead>
     <tbody>{rows or '<tr><td colspan=8>First scan is starting…</td></tr>'}</tbody></table>
     <p><a href='/audit'>View complete audit feed</a></p></body></html>"""
