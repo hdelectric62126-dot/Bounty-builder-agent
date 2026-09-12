@@ -26,6 +26,15 @@ endpoint so projected value never gets confused with money actually earned.
 - Even a fully passing review stops at `AWAITING_DANIEL_APPROVAL`; client handoff is
   never automatic.
 
+## Hardened isolated workspace
+
+Candidate Python files can be sent to a separate private Railway service. Each job
+runs in a disposable Bubblewrap namespace with networking disabled, a cleared
+environment, read-only system files, fixed execution profiles, and limits on CPU,
+memory, processes, files, runtime, and output. The service has no public domain and
+receives no trading, GitHub, client, or deployment credentials. If kernel isolation
+is unavailable, execution fails closed.
+
 A real-world, approval-gated agent that discovers public open-source coding bounties, verifies repository licenses, estimates risk-adjusted value, stores an audit trail, and learns from measured outcomes.
 
 ## Safety contract
