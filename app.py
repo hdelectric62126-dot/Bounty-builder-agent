@@ -15,6 +15,7 @@ from opportunity_scout import OpportunityScout
 from performance_learner import PerformanceLearner
 from historical_experience import HistoricalExperienceCollector
 from delivery_reviewer import CheckEvidence, review_delivery
+from deep_deliberation import deliberate
 from store import Store
 
 DATA_DIR = os.getenv("DATA_DIR", "/data")
@@ -77,6 +78,16 @@ def scan_once():
         items = report.opportunities
         for item in items:
             store.save_opportunity(item)
+            if item["status"] == "APPROVED":
+                saved = next((x for x in store.list_opportunities(200)
+                              if x["external_id"] == item["external_id"]), None)
+                if saved:
+                    thought = deliberate(saved, store.agent_record_map(item["external_id"]),
+                                         store.experience_stats()).to_dict()
+                    stage = store.enqueue_work(saved["id"], thought)
+                    store.audit("deep_deliberation_completed", {"opportunity_id": saved["id"],
+                                "decision_id": thought["decision_id"], "stage": stage,
+                                "confidence": thought["confidence"]})
         proposal = learner.propose(store.outcomes())
         performance = performance_learner.propose(store.performance_rows())
         store.save_learning_proposal(performance)
@@ -122,6 +133,11 @@ def agents():
 @app.get("/api/audit")
 def audit_feed(limit: int = 50):
     return {"events": store.recent_audit(max(1, min(limit, 200)))}
+
+
+@app.get("/api/work-queue")
+def queue_data():
+    return {"jobs": store.work_queue()}
 
 
 @app.get("/api/opportunities/{opportunity_id}")
@@ -196,10 +212,23 @@ def dashboard():
     <div class='card'>Solution plans<br><b>{activity['solution_planner']}</b></div>
     <div class='card'>Learning proposals<br><b>{activity['performance_learner']}</b></div>
     <div class='card'>Historical cases learned<br><b>{activity['historical_experience']}</b></div>
-    <div class='card'>Delivery reviews<br><b>{activity['delivery_reviews']}</b></div></div>
+    <div class='card'>Delivery reviews<br><b>{activity['delivery_reviews']}</b></div>
+    <div class='card'>Deep deliberations<br><b>{activity['deep_deliberations']}</b></div></div>
     <table><thead><tr><th>Status</th><th>Score</th><th>Task</th><th>Repository</th><th>Reward</th><th>Expected value</th><th>License</th><th>Decision</th></tr></thead>
     <tbody>{rows or '<tr><td colspan=8>First scan is starting…</td></tr>'}</tbody></table>
-    <p><a href='/audit'>View complete audit feed</a></p></body></html>"""
+    <p><a href='/work-queue'>Review deep-thinking work queue</a> · <a href='/audit'>View complete audit feed</a></p></body></html>"""
+
+
+@app.get("/work-queue", response_class=HTMLResponse)
+def queue_page():
+    rows = "".join(f"<tr><td>{escape(x['stage'])}</td><td>{x['deliberation']['confidence']:.0%}</td>"
+        f"<td><a href='/opportunities/{x['opportunity_id']}'>{escape(x['title'])}</a></td>"
+        f"<td>${x['expected_value']:.2f}</td><td>{escape(', '.join(x['deliberation']['unresolved']) or 'none')}</td></tr>"
+        for x in store.work_queue())
+    return f"""<!doctype html><html><head><meta name='viewport' content='width=device-width'><title>Work queue</title>
+    <style>body{{font-family:system-ui;background:#07111f;color:#eef;padding:24px}}a{{color:#62d9ff}}table{{width:100%;border-collapse:collapse}}td,th{{padding:9px;border-bottom:1px solid #29405e;text-align:left}}</style></head>
+    <body><p><a href='/'>← Dashboard</a></p><h1>Deep-thinking work queue</h1><p>Five independent passes must agree before a job reaches your approval queue.</p>
+    <table><tr><th>Stage</th><th>Confidence</th><th>Opportunity</th><th>Expected value</th><th>Unresolved</th></tr>{rows}</table></body></html>"""
 
 
 @app.get("/opportunities/{opportunity_id}", response_class=HTMLResponse)
