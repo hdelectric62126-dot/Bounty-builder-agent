@@ -10,6 +10,8 @@ from sandbox_runner import IsolationUnavailable, SandboxRunner
 
 app = FastAPI(title="Bounty Builder Isolated Workspace", version="1.0.0")
 runner = SandboxRunner()
+ISOLATION_READY = runner.capability_check()
+print(f"SANDBOX_ISOLATION_READY={str(ISOLATION_READY).lower()}", flush=True)
 
 
 class Job(BaseModel):
@@ -25,7 +27,7 @@ def authorize(token):
 
 @app.get("/health")
 def health():
-    ready = runner.capability_check()
+    ready = ISOLATION_READY
     return {"status": "ready" if ready else "isolation_unavailable",
             "execution": "fail_closed", "network_during_jobs": "disabled",
             "credentials_available_to_jobs": False}
