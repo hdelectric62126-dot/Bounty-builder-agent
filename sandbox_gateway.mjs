@@ -11,7 +11,7 @@ const TIMEOUT_SECONDS = 60;
 const PROFILES = Object.freeze({
   python_compile: "python -m compileall -q .",
   python_unittest: "python -m unittest discover -s tests -v",
-  trusted_practice: "python -I -m unittest discover -s . -v",
+  trusted_practice: "python -m unittest discover -s . -v",
 });
 
 function json(res, status, value) {
