@@ -7,6 +7,16 @@ from store import Store
 
 
 class CodingGymTests(unittest.TestCase):
+    def test_normalizes_gateway_status_case(self):
+        calls = iter([
+            {"status": "failed", "network": "railway_vm_isolated"},
+            {"status": "passed", "network": "railway_vm_isolated"},
+        ])
+        result = CodingGym(lambda _files, _profile: next(calls)).run(0)
+        self.assertTrue(result["verified_pass"])
+        self.assertEqual("FAILED", result["baseline_status"])
+        self.assertEqual("PASSED", result["repair_status"])
+
     def test_fail_then_pass_drill_records_verified_evidence(self):
         statuses = iter(("FAILED", "PASSED"))
         gym = CodingGym(lambda _files, _profile: {
