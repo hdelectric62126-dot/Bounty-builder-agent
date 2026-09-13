@@ -704,6 +704,9 @@ def dashboard():
     stats = store.stats()
     activity = stats["agent_activity"]
     teacher = teacher_agent.accreditation(EXERCISES, store.practice_history())
+    volume_name = os.getenv("DATA_VOLUME_NAME", "bounty-builder-data")
+    storage_ready = os.path.isdir(DATA_DIR) and os.access(DATA_DIR, os.W_OK)
+    storage_status = "ACTIVE" if storage_ready else "UNAVAILABLE"
     rows = "".join(f"""<tr><td>{escape(x['status'])}</td><td>{x['risk_score']}</td>
       <td><a href='/opportunities/{x['id']}'>{escape(x['title'])}</a><br><small><a href='{escape(x['url'])}'>GitHub source</a></small></td>
       <td>{escape(x['repository'])}</td><td>${x['reward']:.2f}</td>
@@ -719,7 +722,9 @@ def dashboard():
     <div class='cards'><div class='card'>Found<br><b>{stats['found']}</b></div>
     <div class='card'>Approved for work<br><b>{stats['approved'] or 0}</b></div>
     <div class='card'>Rejected by risk<br><b>{stats['rejected'] or 0}</b></div>
-    <div class='card'>Realized income<br><b>${stats['realized_income']:.2f}</b></div></div>
+    <div class='card'>Realized income<br><b>${stats['realized_income']:.2f}</b></div>
+    <div class='card'>Persistent storage<br><b>{storage_status}</b><br>
+    <small>{escape(volume_name)} · {escape(DATA_DIR)} · 1 GB</small></div></div>
     <h2>Agent team activity</h2><div class='cards'>
     <div class='card'>Scout scans<br><b>{activity['opportunity_scout']}</b></div>
     <div class='card'>Repository analyses<br><b>{activity['repository_analyst']}</b></div>
