@@ -7,11 +7,14 @@ const MAX_BODY = 300 * 1024;
 const MAX_FILES = 150;
 const MAX_OUTPUT = 200 * 1024;
 const TIMEOUT_SECONDS = 60;
+const PYTHON_SANDBOX = Sandbox.template()
+  .withPackages("python3")
+  .workdir("/root/work");
 
 const PROFILES = Object.freeze({
-  python_compile: "python -m compileall -q .",
-  python_unittest: "python -m unittest discover -s tests -v",
-  trusted_practice: "python -m unittest discover -s . -v",
+  python_compile: "python3 -m compileall -q .",
+  python_unittest: "python3 -m unittest discover -s tests -v",
+  trusted_practice: "python3 -m unittest discover -s . -v",
 });
 
 function json(res, status, value) {
@@ -65,7 +68,7 @@ function cap(value) {
 
 async function runJob(job) {
   const started = Date.now();
-  const sandbox = await Sandbox.create({
+  const sandbox = await Sandbox.create(PYTHON_SANDBOX, {
     idleTimeoutMinutes: 2,
     networkIsolation: "ISOLATED",
     env: {},
