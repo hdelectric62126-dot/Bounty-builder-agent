@@ -109,6 +109,27 @@ def verify_stripe_signature(payload: bytes, signature: str, secret: str) -> bool
     return any(hmac.compare_digest(expected, value) for value in parts.get("v1", []))
 
 
+def create_highlevel_contact(item):
+    token = os.getenv("HIGHLEVEL_ACCESS_TOKEN", "")
+    location_id = os.getenv("HIGHLEVEL_LOCATION_ID", "")
+    if not token or not location_id:
+        raise HTTPException(503, "HighLevel is not configured")
+    first_name, _, last_name = item["name"].strip().partition(" ")
+    response = requests.post("https://services.leadconnectorhq.com/contacts/",
+        headers={"Authorization": f"Bearer {token}", "Version": "2021-07-28",
+                 "Content-Type": "application/json"}, timeout=20,
+        json={"locationId": location_id, "firstName": first_name,
+              "lastName": last_name, "email": item["email"],
+              "source": "Bounty Builder Agent",
+              "tags": ["bounty-builder-client-request"]})
+    if response.status_code >= 400:
+        raise HTTPException(502, "HighLevel rejected client sync")
+    contact = response.json().get("contact", response.json())
+    if not contact.get("id"):
+        raise HTTPException(502, "HighLevel returned no contact id")
+    return contact["id"]
+
+
 def scan_once():
     if not scan_lock.acquire(blocking=False):
         return {"status": "already_running"}
@@ -282,6 +303,29 @@ def client_request_received(request_id: int):
 def client_requests(x_admin_token: str | None = Header(default=None)):
     require_admin(x_admin_token)
     return {"requests": store.list_client_requests()}
+
+
+@app.get("/api/integrations")
+def integration_status():
+    return {"stripe": bool(os.getenv("STRIPE_SECRET_KEY")),
+            "stripe_webhook": bool(os.getenv("STRIPE_WEBHOOK_SECRET")),
+            "highlevel": bool(os.getenv("HIGHLEVEL_ACCESS_TOKEN") and
+                              os.getenv("HIGHLEVEL_LOCATION_ID"))}
+
+
+@app.post("/api/client-requests/{request_id}/sync-highlevel")
+def sync_client_to_highlevel(request_id: int,
+                             x_admin_token: str | None = Header(default=None)):
+    require_admin(x_admin_token)
+    item = store.get_client_request(request_id)
+    if not item:
+        raise HTTPException(404, "client request not found")
+    previous = store.get_crm_sync(request_id)
+    if previous:
+        return {"status": "already_synced", "contact_id": previous["external_contact_id"]}
+    contact_id = create_highlevel_contact(item)
+    store.record_crm_sync(request_id, "highlevel", contact_id)
+    return {"status": "synced", "contact_id": contact_id}
 
 
 @app.post("/api/client-requests/{request_id}/quote")
