@@ -31,18 +31,12 @@ endpoint so projected value never gets confused with money actually earned.
 
 ## Hardened isolated workspace
 
-Candidate Python files can be sent to a separate private Railway service. Each job
-runs in a disposable Bubblewrap namespace with networking disabled, a cleared
-environment, read-only system files, fixed execution profiles, and limits on CPU,
-memory, processes, files, runtime, and output. The service has no public domain and
-receives no trading, GitHub, client, or deployment credentials. If kernel isolation
-is unavailable, execution fails closed.
-
-Railway hosts that cannot create kernel namespaces may run only the exact bundled
-coding-gym payloads through the trusted-practice profile. The runner rejects any
-changed source, changed test, extra file, or unknown profile before starting a
-process. General and client-supplied code still requires full isolation and fails
-closed without it.
+Candidate Python files are sent to a private Railway gateway. Each job runs in a
+new Railway Sandbox VM with a fixed execution profile, bounded input/runtime/output,
+no production private-network access, and no injected application credentials. The
+gateway destroys the VM in a `finally` block after every pass, failure, or timeout.
+The gateway itself has no public domain and requires a constant-time checked shared
+token from the main service.
 
 ## Deep deliberation queue
 
@@ -93,4 +87,4 @@ python -m unittest discover -s tests -v
 
 ## Current milestone
 
-Version 1 performs real public discovery, license checks, deterministic risk screening, persistent audit logging, and bounded learning proposals. Automated code solving, isolated execution, and public submission remain disabled until a hardened sandbox and explicit approval workflow are added.
+Version 1 performs real public discovery, license checks, deterministic risk screening, persistent audit logging, bounded learning proposals, and isolated code verification in disposable Railway Sandbox VMs. Public submission remains approval-gated.
