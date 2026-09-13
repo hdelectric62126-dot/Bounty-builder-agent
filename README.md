@@ -38,6 +38,12 @@ memory, processes, files, runtime, and output. The service has no public domain 
 receives no trading, GitHub, client, or deployment credentials. If kernel isolation
 is unavailable, execution fails closed.
 
+Railway hosts that cannot create kernel namespaces may run only the exact bundled
+coding-gym payloads through the trusted-practice profile. The runner rejects any
+changed source, changed test, extra file, or unknown profile before starting a
+process. General and client-supplied code still requires full isolation and fails
+closed without it.
+
 ## Deep deliberation queue
 
 Approved opportunities pass through five recorded reviews: requirements,
