@@ -8,6 +8,7 @@ calculating a risk-adjusted expected value.
 from dataclasses import asdict, dataclass
 from hashlib import sha256
 import json
+import math
 from typing import Any
 
 
@@ -26,6 +27,7 @@ class OpportunityRiskInput:
     assigned: bool = False
     competing_pull_requests: int = 0
     competition_data_complete: bool = True
+    reward_claim_valid: bool = True
 
 
 @dataclass(frozen=True)
@@ -48,6 +50,7 @@ def evaluate_risk(
     max_scope_ambiguity: int = 6,
     max_legal_risk: int = 2,
     max_competing_pull_requests: int = 2,
+    max_reward: float = 100_000.0,
     min_expected_value: float = 1.0,
     min_score: int = 55,
 ) -> ComplianceDecision:
@@ -60,13 +63,22 @@ def evaluate_risk(
         "max_scope_ambiguity": max_scope_ambiguity,
         "max_legal_risk": max_legal_risk,
         "max_competing_pull_requests": max_competing_pull_requests,
+        "max_reward": max_reward,
         "min_expected_value": min_expected_value,
         "min_score": min_score,
     }
     reasons: list[str] = []
 
     # Invalid or unbounded inputs fail closed before financial scoring.
-    if item.reward <= 0:
+    reward_is_finite = math.isfinite(item.reward)
+    reward_within_limit = reward_is_finite and item.reward <= max_reward
+    if not item.reward_claim_valid:
+        reasons.append("HARD_STOP_UNVERIFIED_REWARD_CLAIM")
+    if not reward_is_finite:
+        reasons.append("HARD_STOP_INVALID_REWARD")
+    elif item.reward > max_reward:
+        reasons.append("HARD_STOP_REWARD_LIMIT")
+    elif item.reward <= 0:
         reasons.append("HARD_STOP_REWARD_NOT_POSITIVE")
     if not 0 <= item.success_probability <= 1:
         reasons.append("HARD_STOP_INVALID_SUCCESS_PROBABILITY")
@@ -105,11 +117,12 @@ def evaluate_risk(
         0 <= item.success_probability <= 1
         and 0 <= item.payment_confidence <= 1
     )
+    valid_reward = item.reward_claim_valid and reward_within_limit and item.reward > 0
     expected_value = (
         item.reward * item.success_probability * item.payment_confidence
         - item.cash_cost
         - item.estimated_hours * item.hourly_cost
-        if valid_probabilities
+        if valid_probabilities and valid_reward
         else -item.cash_cost - max(0, item.estimated_hours) * max(0, item.hourly_cost)
     )
     expected_value = round(expected_value, 2)
