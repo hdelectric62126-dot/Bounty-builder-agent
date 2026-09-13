@@ -12,6 +12,13 @@ class CodingGymTests(unittest.TestCase):
         self.assertTrue({"input_validation", "api_reliability", "filesystem_security",
                          "database_safety", "job_reliability"}.issubset(categories))
 
+    def test_curriculum_expands_verified_delivery_skills(self):
+        categories = {exercise.category for exercise in EXERCISES}
+        self.assertTrue({"authentication_security", "state_management",
+                         "observability", "data_migrations", "error_handling"}
+                        .issubset(categories))
+        self.assertGreaterEqual(sum(x.language == "node" for x in EXERCISES), 5)
+
     def test_normalizes_gateway_status_case(self):
         calls = iter([
             {"status": "failed", "network": "railway_vm_isolated"},

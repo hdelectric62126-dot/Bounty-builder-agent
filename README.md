@@ -28,6 +28,9 @@ endpoint so projected value never gets confused with money actually earned.
 - When no bounty is approved, the coding gym runs bounded fail-then-fix drills in
   the isolated workspace. It records test evidence, scores, and lessons—not source
   code—and never presents practice as paid client experience.
+- The expanded curriculum verifies authentication, state-machine, observability,
+  migration, error-handling, API, database, filesystem, input-validation, and job
+  reliability skills. Python and Node proficiency are scored independently.
 
 ## Hardened isolated workspace
 

@@ -45,6 +45,12 @@ class TaskReadinessTests(unittest.TestCase):
         result = evaluate_task_readiness(opportunity, records, profile)
         self.assertIn("risk_approval", result.gaps)
 
+    def test_security_work_requires_matching_verified_skill(self):
+        opportunity, records, profile = evidence()
+        opportunity["title"] = "Fix authentication token permissions"
+        result = evaluate_task_readiness(opportunity, records, profile)
+        self.assertIn("skill:authentication_security", result.gaps)
+
 
 if __name__ == "__main__":
     unittest.main()

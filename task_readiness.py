@@ -11,10 +11,20 @@ LANGUAGE_ALIASES = {
 }
 SKILL_KEYWORDS = {
     "api_reliability": ("api", "http", "pagination", "request"),
+    "authentication_security": ("authentication", "authorization", "permission", "token", "session"),
+    "concurrency_safety": ("concurrent", "concurrency", "race", "lock", "parallel"),
+    "data_migrations": ("migration", "schema change", "backfill"),
     "database_safety": ("database", "sqlite", "sql", "query"),
+    "dependency_safety": ("dependency", "package", "requirements", "lockfile"),
+    "error_handling": ("error", "exception", "failure", "fallback"),
     "filesystem_security": ("file", "path", "directory", "upload"),
+    "frontend_accessibility": ("frontend", "html", "form", "accessibility", "aria"),
     "job_reliability": ("job", "queue", "retry", "worker", "idempotent"),
     "input_validation": ("input", "json", "schema", "validate"),
+    "observability": ("logging", "metrics", "audit", "observability", "trace"),
+    "performance": ("performance", "latency", "cache", "optimize", "complexity"),
+    "state_management": ("state", "transition", "workflow", "status"),
+    "testing_quality": ("test", "regression", "coverage", "fixture"),
 }
 
 
