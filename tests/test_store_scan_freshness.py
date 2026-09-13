@@ -43,6 +43,13 @@ class StoreScanFreshnessTests(unittest.TestCase):
         self.assertEqual(0, self.store.reject_unseen_approvals([]))
         self.assertEqual("REJECTED", self.store.list_opportunities()[0]["status"])
 
+    def test_rejected_opportunities_do_not_inflate_expected_value(self):
+        self.store.save_opportunity(opportunity("approved"))
+        rejected = opportunity("spoofed", "REJECTED")
+        rejected["expected_value"] = 999_999_999_999_999_999
+        self.store.save_opportunity(rejected)
+        self.assertEqual(10, self.store.stats()["expected_value"])
+
 
 if __name__ == "__main__":
     unittest.main()
