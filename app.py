@@ -20,7 +20,8 @@ from historical_experience import HistoricalExperienceCollector
 from delivery_reviewer import CheckEvidence, review_delivery
 from deep_deliberation import deliberate
 from store import Store
-from coding_gym import CodingGym
+from coding_gym import CodingGym, EXERCISES
+from training_scheduler import plan_training
 
 DATA_DIR = os.getenv("DATA_DIR", "/data")
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -197,10 +198,15 @@ def worker():
                         "message": str(exc)[:300]})
         if not store.stats()["approved"]:
             rounds = max(1, min(int(os.getenv("PRACTICE_ROUNDS_PER_CYCLE", "10")), 20))
-            start = store.practice_stats()["drills"]
-            for offset in range(rounds):
+            training_plan = plan_training(EXERCISES, store.practice_history(), rounds)
+            store.audit("adaptive_training_planned", {
+                "rounds": len(training_plan),
+                "targets": [{k: item[k] for k in ("exercise_id", "category", "language", "reason")}
+                            for item in training_plan],
+            })
+            for item in training_plan:
                 try:
-                    result = run_practice_with_retry(start + offset)
+                    result = run_practice_with_retry(item["sequence"])
                     saved = store.save_practice_run(result)
                     store.audit("coding_practice_completed", {
                         "exercise_id": result["exercise_id"], "score": result["score"],
@@ -228,7 +234,8 @@ def agents():
 
 @app.get("/api/skills")
 def skills():
-    return {"status": "ok", "profile": store.skill_profile()}
+    return {"status": "ok", "profile": store.skill_profile(),
+            "next_training": plan_training(EXERCISES, store.practice_history(), 5)}
 
 
 @app.get("/api/audit")

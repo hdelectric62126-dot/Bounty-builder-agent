@@ -33,6 +33,9 @@ endpoint so projected value never gets confused with money actually earned.
   reliability skills. Python and Node proficiency are scored independently.
 - Transient sandbox capacity and transport failures are retried three times with
   bounded backoff; permanent validation failures remain immediate hard stops.
+- Adaptive practice spends disposable VM runs on unverified skills first, then
+  language evidence gaps, mastery confirmation, and spaced refreshes. The next
+  five targets and their reasons are visible through `GET /api/skills`.
 
 ## Hardened isolated workspace
 

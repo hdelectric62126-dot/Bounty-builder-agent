@@ -51,6 +51,8 @@ CREATE TABLE IF NOT EXISTS practice_runs (
  difficulty INTEGER, score INTEGER, verified_pass INTEGER, evidence_id TEXT UNIQUE,
  lesson TEXT, result TEXT, created_at TEXT
 );
+CREATE INDEX IF NOT EXISTS idx_practice_exercise_created
+ ON practice_runs(exercise_id, created_at);
 """
 
 
@@ -107,6 +109,12 @@ class Store:
               COALESCE(ROUND(AVG(score),1),0) average_score,
               COALESCE(MAX(difficulty),0) max_difficulty FROM practice_runs""").fetchone()
             return dict(row)
+
+    def practice_history(self):
+        """Return bounded metadata only; source and test code are never stored."""
+        with self.connect() as db:
+            rows = db.execute("SELECT result FROM practice_runs ORDER BY id").fetchall()
+        return [json.loads(row["result"]) for row in rows]
 
     def skill_profile(self):
         """Summarize only sandbox-verified practice evidence."""
