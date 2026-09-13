@@ -18,6 +18,7 @@ class Exercise:
     solution: str
     tests: str
     lesson: str
+    language: str = "python"
 
 
 EXERCISES = (
@@ -49,6 +50,14 @@ EXERCISES = (
         "from unittest import TestCase\nfrom solution import total_cents\n\nclass T(TestCase):\n    def test_uses_integer_cents(self):\n        self.assertEqual(1097, total_cents([(3, 299), (1, 200)]))\n    def test_rejects_negative_values(self):\n        with self.assertRaises(ValueError): total_cents([(-1, 100)])\n",
         "Represent money as integer cents and reject invalid negative inputs.",
     ),
+    Exercise(
+        "node-invoice-rounding", "javascript_correctness", 5,
+        "export function invoiceTotal(lines) {\n  return lines.reduce((sum, [qty, price]) => sum + qty * price, 0);\n}\n",
+        "export function invoiceTotal(lines) {\n  return lines.reduce((sum, [qty, cents]) => {\n    if (!Number.isInteger(qty) || !Number.isInteger(cents) || qty < 0 || cents < 0) throw new RangeError('invalid invoice line');\n    return sum + qty * cents;\n  }, 0);\n}\n",
+        "import test from 'node:test';\nimport assert from 'node:assert/strict';\nimport { invoiceTotal } from './solution.mjs';\n\ntest('totals integer cents', () => assert.equal(invoiceTotal([[3, 299], [1, 200]]), 1097));\ntest('rejects invalid lines', () => assert.throws(() => invoiceTotal([[-1, 100]]), RangeError));\n",
+        "Use integer cents and validate invoice inputs in JavaScript before calculating totals.",
+        "node",
+    ),
 )
 
 
@@ -61,9 +70,11 @@ class CodingGym:
 
     def run(self, sequence: int) -> dict:
         exercise = EXERCISES[sequence % len(EXERCISES)]
-        initial = {"solution.py": exercise.starter, "test_solution.py": exercise.tests}
+        source_name = "solution.mjs" if exercise.language == "node" else "solution.py"
+        test_name = "solution.test.mjs" if exercise.language == "node" else "test_solution.py"
+        initial = {source_name: exercise.starter, test_name: exercise.tests}
         diagnosis = self.diagnostics.run(initial, lambda files, _failure, _attempt: {
-            **files, "solution.py": exercise.solution,
+            **files, source_name: exercise.solution,
         })
         attempts = diagnosis["attempts"]
         baseline_status = attempts[0]["status"]
@@ -79,6 +90,7 @@ class CodingGym:
             "sequence": sequence,
             "category": exercise.category,
             "difficulty": exercise.difficulty,
+            "language": exercise.language,
             "baseline_status": baseline_status,
             "repair_status": repair_status,
             "score": score,
