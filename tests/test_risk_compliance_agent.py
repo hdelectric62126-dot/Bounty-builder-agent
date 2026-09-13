@@ -69,6 +69,21 @@ class RiskComplianceAgentTests(unittest.TestCase):
         self.assertFalse(result.approved)
         self.assertIn("HARD_STOP_INVALID_SUCCESS_PROBABILITY", result.reason_codes)
 
+    def test_oversized_reward_is_rejected_without_polluting_expected_value(self):
+        result = evaluate_risk(valid_item(reward=10**24))
+        self.assertFalse(result.approved)
+        self.assertIn("HARD_STOP_REWARD_LIMIT", result.reason_codes)
+        self.assertLessEqual(result.expected_value, 0)
+
+    def test_non_finite_reward_is_rejected(self):
+        result = evaluate_risk(valid_item(reward=float("inf")))
+        self.assertIn("HARD_STOP_INVALID_REWARD", result.reason_codes)
+        self.assertLessEqual(result.expected_value, 0)
+
+    def test_unverified_reward_claim_is_rejected(self):
+        result = evaluate_risk(valid_item(reward_claim_valid=False))
+        self.assertIn("HARD_STOP_UNVERIFIED_REWARD_CLAIM", result.reason_codes)
+
     def test_assigned_work_is_rejected(self):
         result = evaluate_risk(valid_item(assigned=True))
         self.assertFalse(result.approved)
