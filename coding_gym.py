@@ -60,11 +60,11 @@ class CodingGym:
         exercise = EXERCISES[sequence % len(EXERCISES)]
         baseline = self.execute(
             {"solution.py": exercise.starter, "test_solution.py": exercise.tests},
-            "python_unittest",
+            "trusted_practice",
         )
         repaired = self.execute(
             {"solution.py": exercise.solution, "test_solution.py": exercise.tests},
-            "python_unittest",
+            "trusted_practice",
         )
         baseline_failed = baseline.get("status") == "FAILED"
         repair_passed = repaired.get("status") == "PASSED"
