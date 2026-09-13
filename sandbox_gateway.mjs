@@ -82,7 +82,7 @@ async function runJob(job) {
       env: { HOME: "/root", PYTHONDONTWRITEBYTECODE: "1" },
     });
     output = {
-      status: result.exitCode === 0 ? "passed" : "failed",
+      status: result.exitCode === 0 ? "PASSED" : "FAILED",
       profile: job.profile,
       exit_code: result.exitCode,
       duration_seconds: (Date.now() - started) / 1000,
