@@ -16,6 +16,17 @@ class DatabaseMigrationTests(unittest.TestCase):
                 migrate_sqlite_to_postgres(path, store),
             )
 
+    def test_postgres_adapter_does_not_treat_literal_percent_as_placeholder(self):
+        from store import PostgresConnection
+        class Raw:
+            def execute(self, sql, *args):
+                self.call = (sql, args)
+                return type("Cursor", (), {"rowcount": 0})()
+        connection = object.__new__(PostgresConnection)
+        connection.raw = Raw()
+        connection.execute("SELECT 1 WHERE 'scout_event' LIKE 'scout_%'")
+        self.assertEqual((), connection.raw.call[1])
+
 
 if __name__ == "__main__":
     unittest.main()

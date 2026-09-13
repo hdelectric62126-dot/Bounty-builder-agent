@@ -148,7 +148,7 @@ class PostgresConnection:
         wants_id = bool(re.match(r"\s*INSERT INTO (outcomes|client_requests|client_jobs)\b", sql, re.I))
         if wants_id and "RETURNING" not in sql.upper():
             sql += " RETURNING id"
-        cursor = self.raw.execute(sql, params)
+        cursor = self.raw.execute(sql, params) if params else self.raw.execute(sql)
         return PgCursor(cursor, wants_id)
 
 
