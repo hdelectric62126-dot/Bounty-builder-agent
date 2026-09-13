@@ -42,6 +42,10 @@ CREATE TABLE IF NOT EXISTS client_requests (
  budget TEXT, status TEXT, quote_cents INTEGER, quote_description TEXT,
  stripe_session_id TEXT UNIQUE, payment_status TEXT, created_at TEXT, updated_at TEXT
 );
+CREATE TABLE IF NOT EXISTS crm_syncs (
+ id INTEGER PRIMARY KEY AUTOINCREMENT, client_request_id INTEGER UNIQUE,
+ provider TEXT, external_contact_id TEXT, synced_at TEXT
+);
 CREATE TABLE IF NOT EXISTS practice_runs (
  id INTEGER PRIMARY KEY AUTOINCREMENT, exercise_id TEXT, category TEXT,
  difficulty INTEGER, score INTEGER, verified_pass INTEGER, evidence_id TEXT UNIQUE,
@@ -300,6 +304,22 @@ class Store:
         with self.connect() as db:
             return [dict(row) for row in db.execute(
                 "SELECT * FROM client_requests ORDER BY id DESC LIMIT ?", (limit,))]
+
+    def record_crm_sync(self, request_id, provider, external_contact_id):
+        with self.connect() as db:
+            db.execute("""INSERT INTO crm_syncs VALUES(NULL,?,?,?,?)
+              ON CONFLICT(client_request_id) DO UPDATE SET provider=excluded.provider,
+              external_contact_id=excluded.external_contact_id,
+              synced_at=excluded.synced_at""",
+              (request_id, provider, external_contact_id, now()))
+        self.audit("client_synced_to_crm", {"client_request_id": request_id,
+                   "provider": provider, "external_contact_id": external_contact_id})
+
+    def get_crm_sync(self, request_id):
+        with self.connect() as db:
+            row = db.execute("SELECT * FROM crm_syncs WHERE client_request_id=?",
+                             (request_id,)).fetchone()
+            return dict(row) if row else None
 
     def quote_client_request(self, request_id, amount_cents, description):
         with self.connect() as db:
