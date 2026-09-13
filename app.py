@@ -20,7 +20,7 @@ from performance_learner import PerformanceLearner
 from historical_experience import HistoricalExperienceCollector
 from delivery_reviewer import CheckEvidence, review_delivery
 from deep_deliberation import deliberate
-from store import Store
+from store import Store, INTEGRITY_ERRORS
 from coding_gym import CodingGym, EXERCISES
 from training_scheduler import plan_training
 from client_job_builder import (ClientJobBuilder, PROFILES, build_schema,
@@ -29,10 +29,15 @@ from policy import evaluate_text
 from authority_engine import capability_certificates, decide_authority
 from teacher_agent import TeacherAgent
 from revenue_capital_agent import evaluate_capital
+from database_migration import migrate_sqlite_to_postgres
 
 DATA_DIR = os.getenv("DATA_DIR", "/data")
 os.makedirs(DATA_DIR, exist_ok=True)
-store = Store(os.path.join(DATA_DIR, "bounty_builder.db"))
+DATABASE_URL = os.getenv("DATABASE_URL", "")
+store = Store(DATABASE_URL or os.path.join(DATA_DIR, "bounty_builder.db"))
+database_migration = migrate_sqlite_to_postgres(
+    os.path.join(DATA_DIR, "bounty_builder.db"), store
+)
 learner = Learner(os.path.join(DATA_DIR, "ranking_weights.json"))
 scout = OpportunityScout()
 performance_learner = PerformanceLearner()
@@ -368,7 +373,9 @@ def client_job_worker():
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "mode": "approval_gated_real_world", "stats": store.stats()}
+    return {"status": "ok", "mode": "approval_gated_real_world",
+            "database": "postgres" if store.postgres else "sqlite",
+            "migration": database_migration, "stats": store.stats()}
 
 
 @app.get("/api/agents")
@@ -587,7 +594,7 @@ def queue_client_job(request_id: int, body: ClientJobSubmission,
             PROFILES[readiness["language"]], criteria, files, readiness["required_skills"])
     except PermissionError:
         raise HTTPException(409, "verified payment required before building")
-    except sqlite3.IntegrityError:
+    except INTEGRITY_ERRORS:
         raise HTTPException(409, "a client job already exists for this request")
     return {"status": "QUEUED", "client_job_id": job_id, "readiness": readiness}
 

@@ -86,6 +86,9 @@ Optional environment variables:
 
 - `GITHUB_TOKEN`: raises GitHub API rate limits. Use a least-privilege token with public-repository read access only.
 - `DATA_DIR`: defaults to `/data` for a Railway volume.
+- `DATABASE_URL`: optional PostgreSQL connection URL. When set, the agent uses
+  PostgreSQL and performs an idempotent one-time import from `/data/bounty_builder.db`.
+  Removing this variable rolls the service back to the preserved SQLite database.
 - `SCAN_SECONDS`: defaults to six hours.
 - `STRIPE_SECRET_KEY`: Stripe restricted or secret key used to create approved Checkout Sessions.
 - `STRIPE_WEBHOOK_SECRET`: signing secret for `POST /stripe/webhook`.
