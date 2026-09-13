@@ -8,8 +8,11 @@ from pathlib import Path, PurePosixPath
 import resource
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
+
+from coding_gym import EXERCISES
 
 
 MAX_FILES = 150
@@ -19,6 +22,21 @@ PROFILES = {
     "python_compile": ("python", "-I", "-m", "compileall", "-q", "/work"),
     "python_unittest": ("python", "-I", "-m", "unittest", "discover", "-s", "/work", "-v"),
 }
+
+
+def _practice_payloads() -> set[tuple[tuple[str, str], ...]]:
+    """Exact, immutable payloads permitted without kernel isolation."""
+    payloads = set()
+    for exercise in EXERCISES:
+        for source in (exercise.starter, exercise.solution):
+            payloads.add(tuple(sorted({
+                "solution.py": source,
+                "test_solution.py": exercise.tests,
+            }.items())))
+    return payloads
+
+
+TRUSTED_PRACTICE_PAYLOADS = _practice_payloads()
 
 
 @dataclass(frozen=True)
@@ -76,6 +94,8 @@ class SandboxRunner:
             return False
 
     def execute(self, files: dict[str, str], profile: str) -> SandboxResult:
+        if profile == "trusted_practice":
+            return self.execute_trusted_practice(files)
         if profile not in PROFILES:
             raise ValueError("unsupported execution profile")
         safe = validate_files(files)
@@ -106,6 +126,36 @@ class SandboxRunner:
                 return SandboxResult("TIMEOUT", profile, None,
                     round(time.monotonic() - started, 3),
                     (exc.stdout or "")[:MAX_OUTPUT_BYTES], (exc.stderr or "")[:MAX_OUTPUT_BYTES])
+
+    def execute_trusted_practice(self, files: dict[str, str]) -> SandboxResult:
+        """Run only byte-for-byte bundled drills when namespaces are unavailable."""
+        safe = validate_files(files)
+        if tuple(sorted(safe.items())) not in TRUSTED_PRACTICE_PAYLOADS:
+            raise ValueError("practice payload is not allowlisted")
+        started = time.monotonic()
+        with tempfile.TemporaryDirectory(prefix="bounty-practice-") as directory:
+            root = Path(directory)
+            for relative, content in safe.items():
+                target = root / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(content, encoding="utf-8")
+            environment = {"PATH": "/usr/local/bin:/usr/bin:/bin",
+                           "PYTHONDONTWRITEBYTECODE": "1"}
+            command = [sys.executable, "-I", "-m", "unittest", "discover", "-s", directory, "-v"]
+            try:
+                process = subprocess.run(command, cwd=directory, env=environment,
+                    capture_output=True, text=True, timeout=self.timeout_seconds,
+                    preexec_fn=_limits)
+                status = "PASSED" if process.returncode == 0 else "FAILED"
+                return SandboxResult(status, "trusted_practice", process.returncode,
+                    round(time.monotonic() - started, 3),
+                    process.stdout[:MAX_OUTPUT_BYTES], process.stderr[:MAX_OUTPUT_BYTES],
+                    network="trusted_allowlist")
+            except subprocess.TimeoutExpired as exc:
+                return SandboxResult("TIMEOUT", "trusted_practice", None,
+                    round(time.monotonic() - started, 3),
+                    (exc.stdout or "")[:MAX_OUTPUT_BYTES], (exc.stderr or "")[:MAX_OUTPUT_BYTES],
+                    network="trusted_allowlist")
 
 
 def _limits():
