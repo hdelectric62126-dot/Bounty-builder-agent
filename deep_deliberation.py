@@ -3,6 +3,7 @@
 from dataclasses import asdict, dataclass
 from hashlib import sha256
 import json
+from task_readiness import evaluate_task_readiness
 
 
 @dataclass(frozen=True)
@@ -18,7 +19,8 @@ class Deliberation:
         return asdict(self)
 
 
-def deliberate(opportunity: dict, agent_records: dict, experience: dict) -> Deliberation:
+def deliberate(opportunity: dict, agent_records: dict, experience: dict,
+               skill_profile: dict | None = None) -> Deliberation:
     analysis = agent_records.get("repository_analysis", {})
     risk = agent_records.get("risk_compliance", {})
     plan = agent_records.get("solution_plan", {})
@@ -39,14 +41,20 @@ def deliberate(opportunity: dict, agent_records: dict, experience: dict) -> Deli
     passes.append({"pass": "historical_calibration", "passed": historical_cases >= 30,
         "evidence": {"historical_cases": historical_cases,
                      "average_cycle_days": experience.get("average_cycle_days")}})
+    readiness = evaluate_task_readiness(
+        opportunity, agent_records, skill_profile or {}).to_dict()
+    passes.append({"pass": "verified_task_skills", "passed": readiness["ready"],
+                   "evidence": readiness})
 
     for item in passes:
         if not item["passed"]:
             unresolved.append(item["pass"])
     passed = sum(item["passed"] for item in passes)
     confidence = round(passed / len(passes), 2)
-    recommendation = "QUEUE_FOR_DANIEL_APPROVAL" if passed == len(passes) else "HOLD_FOR_MORE_EVIDENCE"
+    recommendation = ("AUTO_APPROVE_ISOLATED_BUILD" if passed == len(passes)
+                      else "HOLD_FOR_MORE_EVIDENCE")
     canonical = json.dumps({"opportunity": opportunity.get("external_id"), "passes": passes},
                            sort_keys=True, default=str)
     return Deliberation(sha256(canonical.encode()).hexdigest()[:20], recommendation,
-                        confidence, tuple(passes), tuple(unresolved))
+                        confidence, tuple(passes), tuple(unresolved),
+                        approval_required=not readiness["internal_build_authorized"])
