@@ -60,11 +60,13 @@ class Store:
     def __init__(self, path: str):
         self.path = path
         with self.connect() as db:
+            db.execute("PRAGMA journal_mode=WAL")
             db.executescript(SCHEMA)
 
     def connect(self):
         db = sqlite3.connect(self.path)
         db.row_factory = sqlite3.Row
+        db.execute("PRAGMA busy_timeout=5000")
         return db
 
     def audit(self, event, details):

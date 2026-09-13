@@ -67,7 +67,8 @@ def run_practice_with_retry(sequence, attempts=3, pause=time.sleep):
 
 @asynccontextmanager
 async def lifespan(_app):
-    threading.Thread(target=worker, daemon=True).start()
+    for target in (discovery_worker, history_worker, training_worker):
+        threading.Thread(target=target, daemon=True, name=target.__name__).start()
     yield
 
 
@@ -184,41 +185,65 @@ def scan_once():
         scan_lock.release()
 
 
-def worker():
-    history_year = datetime.now(timezone.utc).year - 19
+def run_history_cycle(history_year):
+    try:
+        report = historian.collect_year(history_year)
+        saved = store.save_experience(report["cases"])
+        store.audit("history_sampled", {"year": history_year, "sampled": report["sampled"],
+                    "saved": saved, "code_copied": False})
+        return {"status": "complete", "saved": saved}
+    except Exception as exc:
+        store.audit("history_failed", {"year": history_year, "error": type(exc).__name__,
+                    "message": str(exc)[:300]})
+        return {"status": "failed", "error": type(exc).__name__}
+
+
+def run_training_cycle():
+    if store.stats()["approved"]:
+        return {"status": "skipped", "reason": "approved_work_available"}
+    rounds = max(1, min(int(os.getenv("PRACTICE_ROUNDS_PER_CYCLE", "10")), 20))
+    training_plan = plan_training(EXERCISES, store.practice_history(), rounds)
+    store.audit("adaptive_training_planned", {
+        "rounds": len(training_plan),
+        "targets": [{k: item[k] for k in ("exercise_id", "category", "language", "reason")}
+                    for item in training_plan],
+    })
+    completed = 0
+    for item in training_plan:
+        try:
+            result = run_practice_with_retry(item["sequence"])
+            saved = store.save_practice_run(result)
+            completed += int(bool(saved))
+            store.audit("coding_practice_completed", {
+                "exercise_id": result["exercise_id"], "score": result["score"],
+                "verified_pass": result["verified_pass"], "saved": saved,
+                "practice_only": True,
+            })
+        except Exception as exc:
+            store.audit("coding_practice_failed", {"error": type(exc).__name__,
+                        "message": str(exc)[:300], "exercise_id": item["exercise_id"]})
+    return {"status": "complete", "planned": len(training_plan), "saved": completed}
+
+
+def discovery_worker():
     while True:
         scan_once()
-        try:
-            report = historian.collect_year(history_year)
-            saved = store.save_experience(report["cases"])
-            store.audit("history_sampled", {"year": history_year, "sampled": report["sampled"],
-                        "saved": saved, "code_copied": False})
-        except Exception as exc:
-            store.audit("history_failed", {"year": history_year, "error": type(exc).__name__,
-                        "message": str(exc)[:300]})
-        if not store.stats()["approved"]:
-            rounds = max(1, min(int(os.getenv("PRACTICE_ROUNDS_PER_CYCLE", "10")), 20))
-            training_plan = plan_training(EXERCISES, store.practice_history(), rounds)
-            store.audit("adaptive_training_planned", {
-                "rounds": len(training_plan),
-                "targets": [{k: item[k] for k in ("exercise_id", "category", "language", "reason")}
-                            for item in training_plan],
-            })
-            for item in training_plan:
-                try:
-                    result = run_practice_with_retry(item["sequence"])
-                    saved = store.save_practice_run(result)
-                    store.audit("coding_practice_completed", {
-                        "exercise_id": result["exercise_id"], "score": result["score"],
-                        "verified_pass": result["verified_pass"], "saved": saved,
-                        "practice_only": True,
-                    })
-                except Exception as exc:
-                    store.audit("coding_practice_failed", {"error": type(exc).__name__,
-                                "message": str(exc)[:300]})
+        time.sleep(max(60, int(os.getenv("SCAN_SECONDS", "21600"))))
+
+
+def history_worker():
+    history_year = datetime.now(timezone.utc).year - 19
+    while True:
+        run_history_cycle(history_year)
         current_year = datetime.now(timezone.utc).year
         history_year = current_year - 19 if history_year >= current_year else history_year + 1
-        time.sleep(int(os.getenv("SCAN_SECONDS", "21600")))
+        time.sleep(max(300, int(os.getenv("HISTORY_SECONDS", "21600"))))
+
+
+def training_worker():
+    while True:
+        run_training_cycle()
+        time.sleep(max(300, int(os.getenv("TRAINING_SECONDS", "21600"))))
 
 
 @app.get("/health")

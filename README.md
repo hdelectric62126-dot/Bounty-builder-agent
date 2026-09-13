@@ -36,6 +36,9 @@ endpoint so projected value never gets confused with money actually earned.
 - Adaptive practice spends disposable VM runs on unverified skills first, then
   language evidence gaps, mastery confirmation, and spaced refreshes. The next
   five targets and their reasons are visible through `GET /api/skills`.
+- Discovery, historical study, and adaptive training run in separate workers, so
+  a slow external API cannot stall the other jobs. SQLite uses WAL plus a bounded
+  busy timeout for safe concurrent reads and audit writes.
 
 ## Hardened isolated workspace
 
