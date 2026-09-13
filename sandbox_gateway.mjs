@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { Sandbox } from "railway";
 
 const PORT = Number(process.env.PORT || 8080);
@@ -7,15 +7,38 @@ const MAX_BODY = 300 * 1024;
 const MAX_FILES = 150;
 const MAX_OUTPUT = 200 * 1024;
 const TIMEOUT_SECONDS = 60;
+const MAX_CONCURRENT = Math.max(1, Math.min(Number(process.env.SANDBOX_MAX_CONCURRENT || 2), 4));
+const RESULT_CACHE_MS = 30_000;
 const PYTHON_SANDBOX = Sandbox.template()
-  .withPackages("python3")
+  .withPackages("python3", "nodejs", "npm", "git")
   .workdir("/root/work");
 
 const PROFILES = Object.freeze({
   python_compile: "python3 -m compileall -q .",
   python_unittest: "python3 -m unittest discover -s tests -v",
   trusted_practice: "python3 -m unittest discover -s . -v",
+  python_diagnostics: "python3 -m compileall -q . && python3 -m unittest discover -s . -p 'test*.py' -v",
+  node_diagnostics: "if [ -f package.json ]; then npm test -- --runInBand; else node --test; fi",
 });
+
+let activeJobs = 0;
+const waiters = [];
+const inFlight = new Map();
+const recent = new Map();
+
+async function acquireSlot() {
+  if (activeJobs >= MAX_CONCURRENT) await new Promise((resolve) => waiters.push(resolve));
+  activeJobs += 1;
+}
+
+function releaseSlot() {
+  activeJobs -= 1;
+  waiters.shift()?.();
+}
+
+function jobId(job) {
+  return createHash("sha256").update(JSON.stringify(job)).digest("hex").slice(0, 20);
+}
 
 function json(res, status, value) {
   const body = JSON.stringify(value);
@@ -67,14 +90,16 @@ function cap(value) {
 }
 
 async function runJob(job) {
+  await acquireSlot();
   const started = Date.now();
-  const sandbox = await Sandbox.create(PYTHON_SANDBOX, {
-    idleTimeoutMinutes: 2,
-    networkIsolation: "ISOLATED",
-    env: {},
-  });
+  let sandbox;
   let output;
   try {
+    sandbox = await Sandbox.create(PYTHON_SANDBOX, {
+      idleTimeoutMinutes: 2,
+      networkIsolation: "ISOLATED",
+      env: {},
+    });
     await Promise.all(Object.entries(job.files).map(
       ([name, content]) => sandbox.files.write(`/root/work/${name}`, content),
     ));
@@ -96,7 +121,8 @@ async function runJob(job) {
       credentials_injected: false,
     };
   } finally {
-    await sandbox.destroy();
+    if (sandbox) await sandbox.destroy();
+    releaseSlot();
   }
   return { ...output, workspace_destroyed: true };
 }
@@ -109,6 +135,9 @@ const server = createServer(async (req, res) => {
       private_network_access: false,
       credentials_injected: false,
       teardown: "always",
+      languages: ["python", "node"],
+      max_concurrent: MAX_CONCURRENT,
+      duplicate_window_seconds: RESULT_CACHE_MS / 1000,
     });
   }
   if (req.method !== "POST" || req.url !== "/jobs") return json(res, 404, { detail: "not found" });
@@ -116,8 +145,22 @@ const server = createServer(async (req, res) => {
 
   try {
     const job = validateJob(await readBody(req));
-    const result = await runJob(job);
-    return json(res, 200, result);
+    const id = jobId(job);
+    const cached = recent.get(id);
+    if (cached && Date.now() - cached.savedAt < RESULT_CACHE_MS) {
+      return json(res, 200, { ...cached.result, job_id: id, duplicate_suppressed: true });
+    }
+    let pending = inFlight.get(id);
+    if (!pending) {
+      pending = runJob(job);
+      inFlight.set(id, pending);
+    }
+    const result = await pending;
+    inFlight.delete(id);
+    recent.set(id, { result, savedAt: Date.now() });
+    const expiredBefore = Date.now() - RESULT_CACHE_MS;
+    for (const [key, value] of recent) if (value.savedAt < expiredBefore) recent.delete(key);
+    return json(res, 200, { ...result, job_id: id, duplicate_suppressed: false });
   } catch (error) {
     const message = error instanceof Error ? error.message : "sandbox execution failed";
     const clientError = /^(job|unknown|files|invalid|file content|request body|Unexpected token)/.test(message);
