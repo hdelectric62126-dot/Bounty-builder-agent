@@ -71,6 +71,8 @@ Optional environment variables:
 - `SCAN_SECONDS`: defaults to six hours.
 - `STRIPE_SECRET_KEY`: Stripe restricted or secret key used to create approved Checkout Sessions.
 - `STRIPE_WEBHOOK_SECRET`: signing secret for `POST /stripe/webhook`.
+- `HIGHLEVEL_ACCESS_TOKEN`: private-integration token for the connected HighLevel account.
+- `HIGHLEVEL_LOCATION_ID`: HighLevel sub-account/location that owns client records.
 
 ## Client intake and payment
 
@@ -78,6 +80,11 @@ Clients submit project requests at `/hire`. Requests remain unpaid until Daniel 
 specific quote through the authenticated API. Only then can the agent create a Stripe Checkout
 Session. Stripe's signed webhook marks the request paid; no project request, quote, or browser
 redirect is treated as proof of payment.
+
+HighLevel sync is also approval-gated. `POST /api/client-requests/{id}/sync-highlevel`
+copies a reviewed client's name and email into the configured CRM once, records the external
+contact ID, and never exposes the access token. `GET /api/integrations` reports connector
+readiness using booleans only.
 
 ## Test
 
