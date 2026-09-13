@@ -1,9 +1,8 @@
-FROM python:3.13-slim
-RUN apt-get update && apt-get install -y --no-install-recommends bubblewrap && rm -rf /var/lib/apt/lists/* \
-    && useradd --create-home --uid 10001 sandbox
+FROM node:22-slim
 WORKDIR /app
-COPY requirements.txt coding_gym.py sandbox_runner.py sandbox_api.py ./
-RUN pip install --no-cache-dir -r requirements.txt
-USER sandbox
-ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
-CMD ["sh", "-c", "uvicorn sandbox_api:app --host 0.0.0.0 --port ${PORT:-8080}"]
+COPY package.sandbox.json ./package.json
+RUN npm install --omit=dev --ignore-scripts
+COPY sandbox_gateway.mjs ./
+USER node
+ENV NODE_ENV=production
+CMD ["node", "sandbox_gateway.mjs"]
