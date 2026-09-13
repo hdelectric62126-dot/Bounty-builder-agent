@@ -6,6 +6,8 @@ from dataclasses import dataclass
 import hashlib
 from typing import Callable
 
+from diagnostic_toolchain import DiagnosticPolicy, DiagnosticToolchain
+
 
 @dataclass(frozen=True)
 class Exercise:
@@ -55,19 +57,17 @@ class CodingGym:
 
     def __init__(self, execute: Callable[[dict[str, str], str], dict]):
         self.execute = execute
+        self.diagnostics = DiagnosticToolchain(execute, DiagnosticPolicy(max_attempts=2))
 
     def run(self, sequence: int) -> dict:
         exercise = EXERCISES[sequence % len(EXERCISES)]
-        baseline = self.execute(
-            {"solution.py": exercise.starter, "test_solution.py": exercise.tests},
-            "trusted_practice",
-        )
-        repaired = self.execute(
-            {"solution.py": exercise.solution, "test_solution.py": exercise.tests},
-            "trusted_practice",
-        )
-        baseline_status = str(baseline.get("status", "UNKNOWN")).upper()
-        repair_status = str(repaired.get("status", "UNKNOWN")).upper()
+        initial = {"solution.py": exercise.starter, "test_solution.py": exercise.tests}
+        diagnosis = self.diagnostics.run(initial, lambda files, _failure, _attempt: {
+            **files, "solution.py": exercise.solution,
+        })
+        attempts = diagnosis["attempts"]
+        baseline_status = attempts[0]["status"]
+        repair_status = attempts[-1]["status"] if len(attempts) > 1 else "NOT_ATTEMPTED"
         baseline_failed = baseline_status == "FAILED"
         repair_passed = repair_status == "PASSED"
         score = (40 if baseline_failed else 0) + (60 if repair_passed else 0)
@@ -85,6 +85,9 @@ class CodingGym:
             "verified_pass": baseline_failed and repair_passed,
             "lesson": exercise.lesson,
             "evidence_id": evidence,
-            "network": repaired.get("network", "unknown"),
+            "network": diagnosis.get("network", "unknown"),
+            "isolation": diagnosis.get("isolation", "unknown"),
+            "attempt_count": diagnosis.get("attempt_count", len(attempts)),
+            "failure_classification": diagnosis.get("classification", "unknown"),
             "practice_only": True,
         }
