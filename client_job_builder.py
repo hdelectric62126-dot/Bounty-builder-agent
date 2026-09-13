@@ -6,6 +6,7 @@ import json
 
 from task_readiness import LANGUAGE_ALIASES, SKILL_KEYWORDS
 from code_inspector import inspect_code, sanitize_log
+from review_consensus import review_consensus
 
 
 MAX_FILES = 60
@@ -39,8 +40,10 @@ def client_readiness(project, acceptance_criteria, language, skill_profile):
     required = sorted(skill for skill, words in SKILL_KEYWORDS.items()
                       if any(word in text for word in words))
     verified = set(skill_profile.get("verified_skills") or ())
+    skill_evidence = skill_profile.get("skills") or {}
     evidence = (skill_profile.get("languages") or {}).get(normalized, {})
-    gaps = [f"skill:{skill}" for skill in required if skill not in verified]
+    gaps = [f"skill:{skill}" for skill in required
+            if skill not in verified or int(skill_evidence.get(skill, {}).get("verified_passes") or 0) < 2]
     if normalized not in PROFILES:
         gaps.append("supported_language")
     elif (int(evidence.get("verified_passes") or 0) < 3 or
@@ -132,6 +135,8 @@ class ClientJobBuilder:
             "isolation": execution.get("isolation"),
             "workspace_destroyed": execution.get("workspace_destroyed"),
             "credentials_injected": execution.get("credentials_injected")}
+        evidence["review_consensus"] = review_consensus(
+            job["acceptance_criteria"], changed, evidence)
         return BuildResult(
             "AWAITING_DELIVERY_REVIEW" if passed else "TESTS_FAILED",
             str(generated.get("summary") or "")[:2000], changed, candidate, evidence,

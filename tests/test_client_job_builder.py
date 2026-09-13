@@ -10,13 +10,22 @@ class ClientJobBuilderTests(unittest.TestCase):
                 safe_files({path: "x"})
 
     def test_requires_task_matched_skill(self):
-        profile = {"verified_skills": [], "languages": {
+        profile = {"verified_skills": [], "skills": {}, "languages": {
             "python": {"verified_passes": 10, "average_score": 100}},
             "max_difficulty": 6}
         result = client_readiness("Repair authentication token permission", ["tests pass"],
                                   "Python", profile)
         self.assertFalse(result["ready"])
         self.assertIn("skill:authentication_security", result["gaps"])
+
+    def test_one_pass_is_provisional_not_job_authority(self):
+        profile = {"verified_skills": ["testing_quality"],
+                   "skills": {"testing_quality": {"verified_passes": 1,
+                              "average_score": 100, "max_difficulty": 5}},
+                   "languages": {"python": {"verified_passes": 10, "average_score": 100}},
+                   "max_difficulty": 6}
+        result = client_readiness("Fix regression", ["tests pass"], "python", profile)
+        self.assertIn("skill:testing_quality", result["gaps"])
 
     def test_verified_build_runs_combined_files_in_fixed_profile(self):
         calls = []

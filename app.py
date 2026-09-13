@@ -26,6 +26,7 @@ from training_scheduler import plan_training
 from client_job_builder import (ClientJobBuilder, PROFILES, build_schema,
                                 client_readiness, safe_files)
 from policy import evaluate_text
+from authority_engine import capability_certificates, decide_authority
 
 DATA_DIR = os.getenv("DATA_DIR", "/data")
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -155,6 +156,10 @@ class ClientJobSubmission(BaseModel):
     language: str = Field(min_length=2, max_length=30)
     acceptance_criteria: list[str] = Field(min_length=1, max_length=30)
     source_files: dict[str, str] = Field(min_length=1, max_length=60)
+
+
+class DeliveryApproval(BaseModel):
+    note: str = Field(default="", max_length=500)
 
 
 def require_admin(x_admin_token: str | None):
@@ -306,6 +311,9 @@ def process_next_client_job():
         try:
             result = client_job_builder.build(job)
             store.finish_client_job(job["id"], result)
+            authority = decide_authority("package_for_review", result.evidence,
+                                         job["required_skills"], store.skill_profile())
+            store.record_authority_decision(job["id"], "package_for_review", authority)
             return {"status": result.status, "client_job_id": job["id"]}
         except Exception as exc:
             store.fail_client_job(job["id"], exc)
@@ -351,7 +359,28 @@ def tool_manifest():
          "limits": {"attempts": 3}},
         {"name": "railway_ephemeral_sandbox", "deterministic": True},
         {"name": "delivery_approval_gate", "deterministic": True},
+        {"name": "capability_certificate_issuer", "deterministic": True},
+        {"name": "tiered_authority_engine", "deterministic": True},
+        {"name": "rollback_digest_checkpoint", "deterministic": True},
+        {"name": "six_reviewer_consensus", "deterministic": True},
     ]}
+
+
+@app.get("/api/capabilities")
+def capabilities():
+    profile = store.skill_profile()
+    return {"status": "ok", "certificates": capability_certificates(profile),
+            "authority": {"automatic_internal": ["analyze", "train", "plan",
+              "security_scan", "isolated_build", "repair", "test", "package_for_review"],
+              "daniel_required": sorted(["approve_quote", "accept_contract", "charge_payment",
+              "public_submission", "merge_client_code", "final_delivery", "release_payment",
+              "promote_learning"])} }
+
+
+@app.get("/api/authority-decisions")
+def authority_decisions(x_admin_token: str | None = Header(default=None)):
+    require_admin(x_admin_token)
+    return {"decisions": store.authority_decisions()}
 
 
 @app.get("/api/audit")
@@ -506,6 +535,19 @@ def client_job(job_id: int, x_admin_token: str | None = Header(default=None)):
     if not item:
         raise HTTPException(404, "client job not found")
     return {"job": item}
+
+
+@app.post("/api/client-jobs/{job_id}/approve-delivery")
+def approve_client_job_delivery(job_id: int, body: DeliveryApproval,
+                                x_admin_token: str | None = Header(default=None)):
+    require_admin(x_admin_token)
+    try:
+        decision = store.approve_client_delivery(job_id, body.note.strip())
+    except KeyError:
+        raise HTTPException(404, "client job not found")
+    except PermissionError as exc:
+        raise HTTPException(409, str(exc))
+    return {"status": "DANIEL_APPROVED_FOR_DELIVERY", "decision": decision}
 
 
 @app.post("/api/client-requests/{request_id}/sync-highlevel")

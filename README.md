@@ -113,6 +113,19 @@ and validate syntax. Sandbox output is secret-redacted and capped before storage
 reuse. Failed tests can drive at most two repair passes (three total builds); every
 attempt and its real exit status remain in the delivery evidence.
 
+## Capability certificates and authority
+
+Each skill is independently rated `PROVISIONAL`, `VERIFIED`, or `MASTERED` from
+sandbox passes, score, and difficulty. Two strong passes are required before a skill
+can authorize client work. The authority engine may approve reversible internal
+analysis, planning, isolated building, repair, testing, scanning, and packaging only
+when the matching certificates and runtime evidence pass. Quotes, contracts, charges,
+public submissions, merges, final delivery, payment release, and learning promotion
+always require Daniel. Every decision receives a deterministic ID and audit record.
+Before internal packaging is approved, six independent evidence reviews cover
+requirements, quality, security, isolation, change control, and repair discipline.
+Consensus must be unanimous; confidence alone cannot override a failed reviewer.
+
 ## Test
 
 ```bash

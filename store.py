@@ -53,6 +53,10 @@ CREATE TABLE IF NOT EXISTS client_jobs (
  evidence TEXT, summary TEXT, model_response_id TEXT, error TEXT,
  created_at TEXT, updated_at TEXT
 );
+CREATE TABLE IF NOT EXISTS authority_decisions (
+ id INTEGER PRIMARY KEY AUTOINCREMENT, client_job_id INTEGER, action TEXT,
+ decision_id TEXT UNIQUE, status TEXT, actor TEXT, evidence TEXT, created_at TEXT
+);
 CREATE INDEX IF NOT EXISTS idx_client_jobs_status ON client_jobs(status, id);
 CREATE TABLE IF NOT EXISTS practice_runs (
  id INTEGER PRIMARY KEY AUTOINCREMENT, exercise_id TEXT, category TEXT,
@@ -136,6 +140,7 @@ class Store:
             rows = db.execute("""SELECT category, difficulty, score, result
               FROM practice_runs WHERE verified_pass=1""").fetchall()
         language_scores = {}
+        skill_scores = {}
         for row in rows:
             payload = json.loads(row["result"])
             language = str(payload.get("language") or "unknown")
@@ -143,12 +148,20 @@ class Store:
             verified_skills.add(row["category"])
             scores.append(row["score"])
             max_difficulty = max(max_difficulty, row["difficulty"])
+            skill = skill_scores.setdefault(row["category"], {"scores": [], "max_difficulty": 0})
+            skill["scores"].append(row["score"])
+            skill["max_difficulty"] = max(skill["max_difficulty"], row["difficulty"])
         for language, values in language_scores.items():
             languages[language] = {
                 "verified_passes": len(values),
                 "average_score": round(sum(values) / len(values), 1),
             }
-        return {"verified_skills": sorted(verified_skills), "languages": languages,
+        skills = {name: {"verified_passes": len(value["scores"]),
+                         "average_score": round(sum(value["scores"]) / len(value["scores"]), 1),
+                         "max_difficulty": value["max_difficulty"]}
+                  for name, value in skill_scores.items()}
+        return {"verified_skills": sorted(verified_skills), "skills": skills,
+                "languages": languages,
                 "verified_passes": len(scores),
                 "average_score": round(sum(scores) / len(scores), 1) if scores else 0,
                 "max_difficulty": max_difficulty}
@@ -419,6 +432,38 @@ class Store:
                        (str(error)[:1000], now(), job_id))
         self.audit("client_job_blocked", {"client_job_id": job_id,
                    "error": type(error).__name__, "message": str(error)[:300]})
+
+    def record_authority_decision(self, job_id, action, decision, actor="authority_engine"):
+        with self.connect() as db:
+            db.execute("""INSERT OR IGNORE INTO authority_decisions
+              VALUES(NULL,?,?,?,?,?,?,?)""", (job_id, action, decision["decision_id"],
+              decision["status"], actor, json.dumps(decision), now()))
+        self.audit("authority_decided", {"client_job_id": job_id, "action": action,
+                   "decision_id": decision["decision_id"], "status": decision["status"],
+                   "actor": actor})
+
+    def approve_client_delivery(self, job_id, note):
+        with self.connect() as db:
+            row = db.execute("SELECT status,evidence FROM client_jobs WHERE id=?", (job_id,)).fetchone()
+            if not row:
+                raise KeyError("client job not found")
+            if row["status"] != "AWAITING_DELIVERY_REVIEW":
+                raise PermissionError("job is not ready for delivery approval")
+            db.execute("UPDATE client_jobs SET status='DANIEL_APPROVED_FOR_DELIVERY',updated_at=? WHERE id=?",
+                       (now(), job_id))
+        payload = {"job_id": job_id, "action": "final_delivery", "note": note[:500],
+                   "evidence": json.loads(row["evidence"] or "{}")}
+        decision = {"action": "final_delivery", "status": "DANIEL_APPROVED",
+                    "authorized": True, "scope": "delivery_only",
+                    "decision_id": sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:20]}
+        self.record_authority_decision(job_id, "final_delivery", decision, actor="daniel")
+        return decision
+
+    def authority_decisions(self, limit=100):
+        with self.connect() as db:
+            rows = db.execute("SELECT * FROM authority_decisions ORDER BY id DESC LIMIT ?",
+                              (limit,)).fetchall()
+        return [{**dict(row), "evidence": json.loads(row["evidence"])} for row in rows]
 
     def get_client_job(self, job_id):
         with self.connect() as db:
