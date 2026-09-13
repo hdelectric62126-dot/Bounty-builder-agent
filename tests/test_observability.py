@@ -29,6 +29,13 @@ class ObservabilityTests(unittest.TestCase):
         response = app.opportunity_data(1)
         self.assertEqual(3, len(response["agent_records"]))
 
+    def test_dashboard_exposes_persistent_storage_status(self):
+        page = app.dashboard()
+        self.assertIn("Persistent storage", page)
+        self.assertIn("bounty-builder-data", page)
+        self.assertIn(app.DATA_DIR, page)
+        self.assertIn("1 GB", page)
+
     def test_outcome_requires_admin_and_updates_realized_income(self):
         previous = os.environ.get("ADMIN_TOKEN")
         os.environ["ADMIN_TOKEN"] = "test-secret"
