@@ -157,7 +157,7 @@ def worker():
             store.audit("history_failed", {"year": history_year, "error": type(exc).__name__,
                         "message": str(exc)[:300]})
         if not store.stats()["approved"]:
-            rounds = max(1, min(int(os.getenv("PRACTICE_ROUNDS_PER_CYCLE", "5")), 20))
+            rounds = max(1, min(int(os.getenv("PRACTICE_ROUNDS_PER_CYCLE", "10")), 20))
             start = store.practice_stats()["drills"]
             for offset in range(rounds):
                 try:
