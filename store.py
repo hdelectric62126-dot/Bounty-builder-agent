@@ -246,7 +246,8 @@ class Store:
             row = db.execute("""SELECT COUNT(*) found,
               SUM(status='APPROVED') approved,
               SUM(status='REJECTED') rejected,
-              COALESCE(SUM(expected_value),0) expected_value FROM opportunities""").fetchone()
+              COALESCE(SUM(CASE WHEN status='APPROVED' THEN expected_value ELSE 0 END),0)
+              expected_value FROM opportunities""").fetchone()
             money = db.execute("SELECT COALESCE(SUM(income-cost),0) FROM outcomes").fetchone()[0]
             return {**dict(row), "realized_income": round(money, 2),
                     "agent_activity": self.agent_activity()}
