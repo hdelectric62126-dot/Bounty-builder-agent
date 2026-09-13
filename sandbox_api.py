@@ -30,7 +30,8 @@ def health():
     ready = ISOLATION_READY
     return {"status": "ready" if ready else "isolation_unavailable",
             "execution": "fail_closed", "network_during_jobs": "disabled",
-            "credentials_available_to_jobs": False}
+            "credentials_available_to_jobs": False,
+            "trusted_practice_ready": True}
 
 
 @app.post("/jobs")
