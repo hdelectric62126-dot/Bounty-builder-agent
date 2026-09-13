@@ -124,7 +124,7 @@ def scan_once():
             )
         for saved in (x for x in store.list_opportunities(200) if x["status"] == "APPROVED"):
             thought = deliberate(saved, store.agent_record_map(saved["external_id"]),
-                                 store.experience_stats()).to_dict()
+                                 store.experience_stats(), store.skill_profile()).to_dict()
             stage = store.enqueue_work(saved["id"], thought)
             store.audit("deep_deliberation_completed", {"opportunity_id": saved["id"],
                         "decision_id": thought["decision_id"], "stage": stage,
@@ -184,7 +184,12 @@ def health():
 @app.get("/api/agents")
 def agents():
     return {"status": "ok", "agents": store.agent_activity(),
-            "experience": store.experience_stats()}
+            "experience": store.experience_stats(), "skills": store.skill_profile()}
+
+
+@app.get("/api/skills")
+def skills():
+    return {"status": "ok", "profile": store.skill_profile()}
 
 
 @app.get("/api/audit")
@@ -388,7 +393,7 @@ def queue_page():
         for x in store.work_queue())
     return f"""<!doctype html><html><head><meta name='viewport' content='width=device-width'><title>Work queue</title>
     <style>body{{font-family:system-ui;background:#07111f;color:#eef;padding:24px}}a{{color:#62d9ff}}table{{width:100%;border-collapse:collapse}}td,th{{padding:9px;border-bottom:1px solid #29405e;text-align:left}}</style></head>
-    <body><p><a href='/'>← Dashboard</a></p><h1>Deep-thinking work queue</h1><p>Five independent passes must agree before a job reaches your approval queue.</p>
+    <body><p><a href='/'>← Dashboard</a></p><h1>Deep-thinking work queue</h1><p>Six evidence passes, including verified task-matched skills, must agree before an isolated build is authorized.</p>
     <table><tr><th>Stage</th><th>Confidence</th><th>Opportunity</th><th>Expected value</th><th>Unresolved</th></tr>{rows}</table></body></html>"""
 
 
