@@ -133,6 +133,17 @@ Before internal packaging is approved, six independent evidence reviews cover
 requirements, quality, security, isolation, change control, and repair discipline.
 Consensus must be unanimous; confidence alone cannot override a failed reviewer.
 
+## Revenue Capital Agent
+
+Authenticated `POST /api/revenue-capital/evaluate` accepts aggregate cash, credit,
+spending categories, and candidate revenue opportunities. It protects essential
+household categories and a cash reserve, flags non-revenue discretionary spending,
+accounts for financing cost and probability of success, and rejects opportunities
+with negative expected profit, weak ROI, slow payback, missing evidence, or capital
+needs outside the conservative utilization ceiling. It stores only an audit summary,
+not raw balances or transaction details. Available credit is never counted as income,
+and borrowing, charges, transfers, and account changes remain advisory-only.
+
 ## Test
 
 ```bash

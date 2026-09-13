@@ -28,6 +28,7 @@ from client_job_builder import (ClientJobBuilder, PROFILES, build_schema,
 from policy import evaluate_text
 from authority_engine import capability_certificates, decide_authority
 from teacher_agent import TeacherAgent
+from revenue_capital_agent import evaluate_capital
 
 DATA_DIR = os.getenv("DATA_DIR", "/data")
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -162,6 +163,31 @@ class ClientJobSubmission(BaseModel):
 
 class DeliveryApproval(BaseModel):
     note: str = Field(default="", max_length=500)
+
+
+class SpendingItem(BaseModel):
+    label: str = Field(min_length=1, max_length=100)
+    category: str = Field(min_length=1, max_length=50)
+    amount_cents: int = Field(ge=0, le=100_000_000)
+    revenue_linked: bool = False
+
+
+class RevenueOpportunity(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    cost_cents: int = Field(ge=0, le=100_000_000)
+    gross_revenue_cents: int = Field(ge=0, le=100_000_000)
+    finance_cost_cents: int = Field(default=0, ge=0, le=100_000_000)
+    success_probability: float = Field(ge=0, le=1)
+    payback_days: int = Field(ge=1, le=3650)
+    evidence: str = Field(default="", max_length=500)
+
+
+class CapitalEvaluation(BaseModel):
+    available_cash_cents: int = Field(ge=0, le=100_000_000)
+    total_credit_limit_cents: int = Field(ge=0, le=100_000_000)
+    total_credit_balance_cents: int = Field(ge=0, le=100_000_000)
+    monthly_spending: list[SpendingItem] = Field(default_factory=list, max_length=500)
+    opportunities: list[RevenueOpportunity] = Field(default_factory=list, max_length=100)
 
 
 def require_admin(x_admin_token: str | None):
@@ -364,6 +390,26 @@ def teacher_status():
             "stored_cycle": store.latest_teacher_cycle()}
 
 
+@app.post("/api/revenue-capital/evaluate")
+def revenue_capital(body: CapitalEvaluation,
+                    x_admin_token: str | None = Header(default=None)):
+    require_admin(x_admin_token)
+    snapshot = body.model_dump(exclude={"opportunities"})
+    try:
+        plan = evaluate_capital(snapshot,
+            [item.model_dump() for item in body.opportunities])
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    store.audit("revenue_capital_evaluated", {
+        "analysis_id": plan["analysis_id"],
+        "opportunity_count": len(plan["opportunities"]),
+        "qualified_count": sum(item["decision"] == "QUALIFIED"
+                               for item in plan["opportunities"]),
+        "raw_financial_data_stored": False,
+    })
+    return {"status": "ok", "plan": plan}
+
+
 @app.get("/api/tools")
 def tool_manifest():
     return {"status": "ok", "tools": [
@@ -385,6 +431,8 @@ def tool_manifest():
         {"name": "hidden_exam_form_issuer", "deterministic": True},
         {"name": "teacher_internal_accreditation_board", "deterministic": True,
          "third_party_accreditation": False},
+        {"name": "revenue_capital_allocator", "deterministic": True,
+         "automatic_borrowing": False, "automatic_spending": False},
     ]}
 
 
