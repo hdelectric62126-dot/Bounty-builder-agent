@@ -66,19 +66,21 @@ class CodingGym:
             {"solution.py": exercise.solution, "test_solution.py": exercise.tests},
             "trusted_practice",
         )
-        baseline_failed = baseline.get("status") == "FAILED"
-        repair_passed = repaired.get("status") == "PASSED"
+        baseline_status = str(baseline.get("status", "UNKNOWN")).upper()
+        repair_status = str(repaired.get("status", "UNKNOWN")).upper()
+        baseline_failed = baseline_status == "FAILED"
+        repair_passed = repair_status == "PASSED"
         score = (40 if baseline_failed else 0) + (60 if repair_passed else 0)
         evidence = hashlib.sha256(
-            f"{sequence}:{exercise.exercise_id}:{baseline.get('status')}:{repaired.get('status')}".encode()
+            f"{sequence}:{exercise.exercise_id}:{baseline_status}:{repair_status}".encode()
         ).hexdigest()[:20]
         return {
             "exercise_id": exercise.exercise_id,
             "sequence": sequence,
             "category": exercise.category,
             "difficulty": exercise.difficulty,
-            "baseline_status": baseline.get("status", "UNKNOWN"),
-            "repair_status": repaired.get("status", "UNKNOWN"),
+            "baseline_status": baseline_status,
+            "repair_status": repair_status,
             "score": score,
             "verified_pass": baseline_failed and repair_passed,
             "lesson": exercise.lesson,
