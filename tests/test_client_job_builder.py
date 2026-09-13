@@ -44,6 +44,24 @@ class ClientJobBuilderTests(unittest.TestCase):
                                 "language": "python", "source_files": {"app.py": "x=1"}})
         self.assertEqual("TESTS_FAILED", result.status)
 
+    def test_uses_sandbox_failure_to_drive_bounded_repair(self):
+        packets = []
+        def generate(packet):
+            packets.append(packet)
+            value = "x=2" if packet["attempt"] == 1 else "x=3"
+            return {"summary": "repair", "files": [{"path": "app.py", "content": value}]}
+        executions = iter((
+            {"status": "FAILED", "exit_code": 1, "stderr": "assertion failed"},
+            {"status": "PASSED", "exit_code": 0, "stderr": ""},
+        ))
+        result = ClientJobBuilder(generate, lambda _files, _profile: next(executions)).build({
+            "project": "fix", "acceptance_criteria": ["test"], "language": "python",
+            "source_files": {"app.py": "x=1"}})
+        self.assertEqual("AWAITING_DELIVERY_REVIEW", result.status)
+        self.assertEqual(2, len(packets))
+        self.assertEqual("FAILED", packets[1]["diagnostic_feedback"]["sandbox_status"])
+        self.assertEqual(2, len(result.evidence["attempts"]))
+
 
 if __name__ == "__main__":
     unittest.main()

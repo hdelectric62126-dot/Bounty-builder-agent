@@ -107,6 +107,12 @@ receives no tools or credentials. A separate worker runs the merged project unde
 diagnostic profile and stores digests plus isolation evidence. Passing work stops at
 `AWAITING_DELIVERY_REVIEW`; it is never submitted or delivered automatically.
 
+Before execution, deterministic tools enforce a 25-file/3,000-line change budget,
+scan for credential patterns, reject dangerous Python and Node execution primitives,
+and validate syntax. Sandbox output is secret-redacted and capped before storage or
+reuse. Failed tests can drive at most two repair passes (three total builds); every
+attempt and its real exit status remain in the delivery evidence.
+
 ## Test
 
 ```bash

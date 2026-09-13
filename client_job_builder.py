@@ -5,6 +5,7 @@ from hashlib import sha256
 import json
 
 from task_readiness import LANGUAGE_ALIASES, SKILL_KEYWORDS
+from code_inspector import inspect_code, sanitize_log
 
 
 MAX_FILES = 60
@@ -80,40 +81,61 @@ class BuildResult:
 
 
 class ClientJobBuilder:
-    def __init__(self, generate, execute):
+    def __init__(self, generate, execute, max_attempts=3):
         self.generate = generate
         self.execute = execute
+        self.max_attempts = max(1, min(int(max_attempts), 3))
 
     def build(self, job):
         source = safe_files(job["source_files"])
-        generated = self.generate({
-            "project": job["project"],
-            "acceptance_criteria": job["acceptance_criteria"],
-            "language": job["language"],
-            "source_files": source,
-        })
-        proposed = safe_files({item["path"]: item["content"] for item in generated["files"]})
-        changed = sorted(path for path, content in proposed.items()
-                         if source.get(path) != content)
-        if not changed:
-            raise ValueError("builder produced no changes")
-        combined = {**source, **proposed}
-        combined = safe_files(combined)
-        execution = self.execute(combined, PROFILES[job["language"]])
-        passed = str(execution.get("status", "")).upper() == "PASSED"
-        evidence = {
-            "sandbox_status": str(execution.get("status", "UNKNOWN")).upper(),
-            "profile": PROFILES[job["language"]],
-            "exit_code": execution.get("exit_code"),
+        preflight = inspect_code(source, source)
+        if not preflight.passed:
+            raise ValueError("source failed credential or security preflight")
+        candidate = source
+        attempts = []
+        generated = {}
+        execution = {}
+        inspection = None
+        for attempt in range(1, self.max_attempts + 1):
+            generated = self.generate({
+                "project": job["project"], "acceptance_criteria": job["acceptance_criteria"],
+                "language": job["language"], "source_files": candidate,
+                "diagnostic_feedback": attempts[-1] if attempts else None,
+                "attempt": attempt, "maximum_attempts": self.max_attempts,
+            })
+            proposed = safe_files({item["path"]: item["content"] for item in generated["files"]})
+            combined = safe_files({**candidate, **proposed})
+            changed = sorted(path for path, content in combined.items()
+                             if source.get(path) != content)
+            if not changed:
+                raise ValueError("builder produced no changes")
+            inspection = inspect_code(source, combined)
+            if not inspection.passed:
+                raise ValueError("generated code failed deterministic security inspection")
+            execution = self.execute(combined, PROFILES[job["language"]])
+            attempt_evidence = {
+                "attempt": attempt,
+                "sandbox_status": str(execution.get("status", "UNKNOWN")).upper(),
+                "exit_code": execution.get("exit_code"),
+                "stdout": sanitize_log(execution.get("stdout")),
+                "stderr": sanitize_log(execution.get("stderr")),
+            }
+            attempts.append(attempt_evidence)
+            candidate = combined
+            if attempt_evidence["sandbox_status"] == "PASSED":
+                break
+        passed = attempts[-1]["sandbox_status"] == "PASSED"
+        evidence = {"sandbox_status": attempts[-1]["sandbox_status"],
+            "profile": PROFILES[job["language"]], "attempts": attempts,
+            "inspection": inspection.to_dict(),
             "duration_seconds": execution.get("duration_seconds"),
             "isolation": execution.get("isolation"),
             "workspace_destroyed": execution.get("workspace_destroyed"),
-            "credentials_injected": execution.get("credentials_injected"),
-        }
+            "credentials_injected": execution.get("credentials_injected")}
         return BuildResult(
             "AWAITING_DELIVERY_REVIEW" if passed else "TESTS_FAILED",
-            str(generated.get("summary") or "")[:2000], changed, combined, evidence,
-            _digest(source), _digest(combined), str(generated.get("response_id") or ""))
+            str(generated.get("summary") or "")[:2000], changed, candidate, evidence,
+            _digest(source), _digest(candidate), str(generated.get("response_id") or ""))
 
 
 def _digest(files):

@@ -338,6 +338,22 @@ def skills():
             "next_training": plan_training(EXERCISES, store.practice_history(), 5)}
 
 
+@app.get("/api/tools")
+def tool_manifest():
+    return {"status": "ok", "tools": [
+        {"name": "secret_scanner", "deterministic": True},
+        {"name": "static_security", "deterministic": True},
+        {"name": "change_budget", "deterministic": True,
+         "limits": {"files": 25, "lines": 3000}},
+        {"name": "diagnostic_log_capture", "deterministic": True,
+         "limits": {"characters_per_stream": 4000}},
+        {"name": "bounded_auto_repair", "deterministic": False,
+         "limits": {"attempts": 3}},
+        {"name": "railway_ephemeral_sandbox", "deterministic": True},
+        {"name": "delivery_approval_gate", "deterministic": True},
+    ]}
+
+
 @app.get("/api/audit")
 def audit_feed(limit: int = 50):
     return {"events": store.recent_audit(max(1, min(limit, 200)))}
