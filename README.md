@@ -31,6 +31,8 @@ endpoint so projected value never gets confused with money actually earned.
 - The expanded curriculum verifies authentication, state-machine, observability,
   migration, error-handling, API, database, filesystem, input-validation, and job
   reliability skills. Python and Node proficiency are scored independently.
+- Transient sandbox capacity and transport failures are retried three times with
+  bounded backoff; permanent validation failures remain immediate hard stops.
 
 ## Hardened isolated workspace
 

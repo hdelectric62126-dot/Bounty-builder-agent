@@ -46,6 +46,24 @@ def execute_practice(files, profile):
 coding_gym = CodingGym(execute_practice)
 
 
+def run_practice_with_retry(sequence, attempts=3, pause=time.sleep):
+    """Retry only transient sandbox transport/capacity failures."""
+    last_error = None
+    for attempt in range(attempts):
+        try:
+            return coding_gym.run(sequence)
+        except (requests.Timeout, requests.ConnectionError) as exc:
+            last_error = exc
+        except requests.HTTPError as exc:
+            status = exc.response.status_code if exc.response is not None else 0
+            if status not in {429, 502, 503, 504}:
+                raise
+            last_error = exc
+        if attempt + 1 < attempts:
+            pause(min(2 ** attempt, 4))
+    raise last_error
+
+
 @asynccontextmanager
 async def lifespan(_app):
     threading.Thread(target=worker, daemon=True).start()
@@ -182,7 +200,7 @@ def worker():
             start = store.practice_stats()["drills"]
             for offset in range(rounds):
                 try:
-                    result = coding_gym.run(start + offset)
+                    result = run_practice_with_retry(start + offset)
                     saved = store.save_practice_run(result)
                     store.audit("coding_practice_completed", {
                         "exercise_id": result["exercise_id"], "score": result["score"],
