@@ -37,7 +37,8 @@ class HighLevelTests(unittest.TestCase):
                "HIGHLEVEL_ACCESS_TOKEN": "high_secret", "HIGHLEVEL_LOCATION_ID": "loc"}
         with patch.dict(os.environ, env, clear=True):
             result = app.integration_status()
-        self.assertEqual({"stripe": True, "stripe_webhook": True, "highlevel": True}, result)
+        self.assertEqual({"stripe": True, "stripe_webhook": True, "highlevel": True,
+                          "openai_coding": False, "client_job_builder": False}, result)
         self.assertNotIn("secret", repr(result))
 
 

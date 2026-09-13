@@ -46,6 +46,14 @@ CREATE TABLE IF NOT EXISTS crm_syncs (
  id INTEGER PRIMARY KEY AUTOINCREMENT, client_request_id INTEGER UNIQUE,
  provider TEXT, external_contact_id TEXT, synced_at TEXT
 );
+CREATE TABLE IF NOT EXISTS client_jobs (
+ id INTEGER PRIMARY KEY AUTOINCREMENT, client_request_id INTEGER UNIQUE,
+ status TEXT, language TEXT, profile TEXT, acceptance_criteria TEXT,
+ source_files TEXT, required_skills TEXT, changed_files TEXT, output_files TEXT,
+ evidence TEXT, summary TEXT, model_response_id TEXT, error TEXT,
+ created_at TEXT, updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_client_jobs_status ON client_jobs(status, id);
 CREATE TABLE IF NOT EXISTS practice_runs (
  id INTEGER PRIMARY KEY AUTOINCREMENT, exercise_id TEXT, category TEXT,
  difficulty INTEGER, score INTEGER, verified_pass INTEGER, evidence_id TEXT UNIQUE,
@@ -359,6 +367,84 @@ class Store:
         self.audit("client_payment_confirmed", {"client_request_id": request_id,
                    "stripe_session_id": session_id})
         return request_id
+
+    def create_client_job(self, request_id, language, profile, acceptance_criteria,
+                          source_files, required_skills):
+        timestamp = now()
+        with self.connect() as db:
+            request = db.execute("SELECT * FROM client_requests WHERE id=?", (request_id,)).fetchone()
+            if not request:
+                raise KeyError("client request not found")
+            if request["status"] != "PAID" or request["payment_status"] != "paid":
+                raise PermissionError("verified payment required")
+            cursor = db.execute("""INSERT INTO client_jobs
+              (client_request_id,status,language,profile,acceptance_criteria,source_files,
+               required_skills,changed_files,output_files,evidence,summary,model_response_id,
+               error,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+              (request_id, "QUEUED", language, profile, json.dumps(acceptance_criteria),
+               json.dumps(source_files), json.dumps(required_skills), "[]", "{}", "{}",
+               "", "", "", timestamp, timestamp))
+            job_id = cursor.lastrowid
+        self.audit("client_job_queued", {"client_job_id": job_id,
+                   "client_request_id": request_id, "language": language,
+                   "required_skills": required_skills})
+        return job_id
+
+    def claim_client_job(self):
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT id FROM client_jobs WHERE status='QUEUED' ORDER BY id LIMIT 1").fetchone()
+            if not row:
+                return None
+            db.execute("UPDATE client_jobs SET status='BUILDING',updated_at=? WHERE id=?",
+                       (now(), row["id"]))
+            job = db.execute("""SELECT j.*,r.project FROM client_jobs j JOIN client_requests r
+              ON r.id=j.client_request_id WHERE j.id=?""", (row["id"],)).fetchone()
+        return self._decode_client_job(job)
+
+    def finish_client_job(self, job_id, result):
+        with self.connect() as db:
+            db.execute("""UPDATE client_jobs SET status=?,changed_files=?,output_files=?,
+              evidence=?,summary=?,model_response_id=?,error='',updated_at=? WHERE id=?""",
+              (result.status, json.dumps(result.changed_files), json.dumps(result.output_files),
+               json.dumps({**result.evidence, "source_digest": result.source_digest,
+                           "output_digest": result.output_digest}), result.summary,
+               result.model_response_id, now(), job_id))
+        self.audit("client_job_built", {"client_job_id": job_id, "status": result.status,
+                   "changed_files": result.changed_files, "evidence": result.evidence})
+
+    def fail_client_job(self, job_id, error):
+        with self.connect() as db:
+            db.execute("UPDATE client_jobs SET status='BLOCKED',error=?,updated_at=? WHERE id=?",
+                       (str(error)[:1000], now(), job_id))
+        self.audit("client_job_blocked", {"client_job_id": job_id,
+                   "error": type(error).__name__, "message": str(error)[:300]})
+
+    def get_client_job(self, job_id):
+        with self.connect() as db:
+            row = db.execute("""SELECT j.*,r.project FROM client_jobs j JOIN client_requests r
+              ON r.id=j.client_request_id WHERE j.id=?""", (job_id,)).fetchone()
+        return self._decode_client_job(row) if row else None
+
+    def list_client_jobs(self, limit=100):
+        with self.connect() as db:
+            rows = db.execute("""SELECT j.*,r.project FROM client_jobs j JOIN client_requests r
+              ON r.id=j.client_request_id ORDER BY j.id DESC LIMIT ?""", (limit,)).fetchall()
+        return [self._decode_client_job(row, include_code=False) for row in rows]
+
+    @staticmethod
+    def _decode_client_job(row, include_code=True):
+        item = dict(row)
+        for key, empty in (("acceptance_criteria", []), ("required_skills", []),
+                           ("changed_files", []), ("evidence", {})):
+            item[key] = json.loads(item.get(key) or json.dumps(empty))
+        if include_code:
+            item["source_files"] = json.loads(item.get("source_files") or "{}")
+            item["output_files"] = json.loads(item.get("output_files") or "{}")
+        else:
+            item.pop("source_files", None)
+            item.pop("output_files", None)
+        return item
 
 
 def now():

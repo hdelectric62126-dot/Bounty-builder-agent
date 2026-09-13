@@ -19,6 +19,11 @@ class CodingGymTests(unittest.TestCase):
                         .issubset(categories))
         self.assertGreaterEqual(sum(x.language == "node" for x in EXERCISES), 5)
 
+    def test_curriculum_covers_common_client_delivery_gaps(self):
+        categories = {exercise.category for exercise in EXERCISES}
+        self.assertTrue({"testing_quality", "concurrency_safety", "dependency_safety",
+                         "frontend_accessibility", "performance"}.issubset(categories))
+
     def test_normalizes_gateway_status_case(self):
         calls = iter([
             {"status": "failed", "network": "railway_vm_isolated"},

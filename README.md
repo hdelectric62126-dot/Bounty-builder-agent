@@ -97,6 +97,16 @@ copies a reviewed client's name and email into the configured CRM once, records 
 contact ID, and never exposes the access token. `GET /api/integrations` reports connector
 readiness using booleans only.
 
+## Client job builder
+
+After Stripe confirms payment, Daniel can queue a bounded Python or Node project through
+`POST /api/client-requests/{id}/jobs`. The gate requires task-matched verified skills,
+safe text files, explicit acceptance criteria, an OpenAI coding engine, and the private
+Railway sandbox. The coding engine returns strict schema-constrained complete files; it
+receives no tools or credentials. A separate worker runs the merged project under a fixed
+diagnostic profile and stores digests plus isolation evidence. Passing work stops at
+`AWAITING_DELIVERY_REVIEW`; it is never submitted or delivered automatically.
+
 ## Test
 
 ```bash

@@ -156,6 +156,41 @@ EXERCISES = (
         "import test from 'node:test'; import assert from 'node:assert/strict'; import {transition} from './solution.mjs';\ntest('forward',()=>assert.equal(transition('NEW','QUOTED'),'QUOTED'));\ntest('skip',()=>assert.throws(()=>transition('NEW','PAID'),RangeError));\n",
         "Enforce workflow approval order in Node services as well as Python.", "node",
     ),
+    Exercise(
+        "regression-boundary-tests", "testing_quality", 5,
+        "def classify(value): return 'positive' if value > 0 else 'negative'\n",
+        "def classify(value):\n if value > 0: return 'positive'\n if value < 0: return 'negative'\n return 'zero'\n",
+        "from unittest import TestCase\nfrom solution import classify\nclass T(TestCase):\n def test_positive(self): self.assertEqual('positive',classify(1))\n def test_negative(self): self.assertEqual('negative',classify(-1))\n def test_boundary(self): self.assertEqual('zero',classify(0))\n",
+        "Regression suites must test boundaries, not only the happy path.",
+    ),
+    Exercise(
+        "optimistic-version-update", "concurrency_safety", 6,
+        "def update(record,expected,value): record['value']=value; return record\n",
+        "def update(record,expected,value):\n if record.get('version') != expected: raise RuntimeError('conflict')\n return {**record,'value':value,'version':expected+1}\n",
+        "from unittest import TestCase\nfrom solution import update\nclass T(TestCase):\n def test_update(self): self.assertEqual(3,update({'version':2},2,'x')['version'])\n def test_conflict(self):\n  with self.assertRaises(RuntimeError): update({'version':3},2,'x')\n def test_copy(self):\n  row={'version':1}; update(row,1,'x'); self.assertNotIn('value',row)\n",
+        "Use version checks so concurrent writers cannot silently overwrite each other.",
+    ),
+    Exercise(
+        "pinned-dependency-policy", "dependency_safety", 5,
+        "def validate(lines): return True\n",
+        "def validate(lines):\n for line in lines:\n  item=line.strip()\n  if not item or item.startswith('#'): continue\n  if '==' not in item or item.count('==') != 1: raise ValueError('dependency must be pinned')\n  name,version=item.split('==');\n  if not name or not version or any(x in item for x in ('git+','http://','https://')): raise ValueError('unsafe dependency')\n return True\n",
+        "from unittest import TestCase\nfrom solution import validate\nclass T(TestCase):\n def test_pinned(self): self.assertTrue(validate(['requests==2.32.5']))\n def test_range(self):\n  with self.assertRaises(ValueError): validate(['requests>=2'])\n def test_url(self):\n  with self.assertRaises(ValueError): validate(['x==git+https://evil'])\n",
+        "Dependencies must be pinned and must not silently install from arbitrary URLs.",
+    ),
+    Exercise(
+        "accessible-form-labels", "frontend_accessibility", 4,
+        "def field(name,label): return f'<input name=\"{name}\">'\n",
+        "import html\ndef field(name,label):\n safe_name=html.escape(name,quote=True); safe_label=html.escape(label); return f'<label for=\"{safe_name}\">{safe_label}</label><input id=\"{safe_name}\" name=\"{safe_name}\">'\n",
+        "from unittest import TestCase\nfrom solution import field\nclass T(TestCase):\n def test_label(self): self.assertIn('for=\"email\"',field('email','Email'))\n def test_id(self): self.assertIn('id=\"email\"',field('email','Email'))\n def test_escape(self): self.assertNotIn('<script>',field('email','<script>'))\n",
+        "Accessible forms need associated labels and escaped user-visible text.",
+    ),
+    Exercise(
+        "linear-membership-index", "performance", 5,
+        "def missing(required,available): return [x for x in required if x not in list(available)]\n",
+        "def missing(required,available):\n index=set(available); return [x for x in required if x not in index]\n",
+        "from unittest import TestCase\nfrom solution import missing\nclass OnePass:\n def __init__(self,values): self.values=values; self.used=False\n def __iter__(self):\n  if self.used: raise RuntimeError('rescanned')\n  self.used=True; return iter(self.values)\nclass T(TestCase):\n def test_result(self): self.assertEqual([1,3],missing([1,2,3],OnePass([2])))\n def test_order(self): self.assertEqual([3,1],missing([3,2,1],[2]))\n",
+        "Build a membership index once to avoid repeated linear scans while preserving output order.",
+    ),
 )
 
 
