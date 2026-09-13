@@ -2,7 +2,7 @@ FROM python:3.13-slim
 RUN apt-get update && apt-get install -y --no-install-recommends bubblewrap && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --uid 10001 sandbox
 WORKDIR /app
-COPY requirements.txt sandbox_runner.py sandbox_api.py ./
+COPY requirements.txt coding_gym.py sandbox_runner.py sandbox_api.py ./
 RUN pip install --no-cache-dir -r requirements.txt
 USER sandbox
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
