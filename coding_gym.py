@@ -58,6 +58,41 @@ EXERCISES = (
         "Use integer cents and validate invoice inputs in JavaScript before calculating totals.",
         "node",
     ),
+    Exercise(
+        "strict-json-contract", "input_validation", 3,
+        "import json\n\ndef parse_config(raw):\n    return json.loads(raw)\n",
+        "import json\n\ndef parse_config(raw):\n    value=json.loads(raw)\n    if not isinstance(value,dict) or set(value)!={'enabled','retries'}: raise ValueError('shape')\n    if type(value['enabled']) is not bool or type(value['retries']) is not int: raise ValueError('types')\n    if not 0 <= value['retries'] <= 5: raise ValueError('range')\n    return value\n",
+        "from unittest import TestCase\nfrom solution import parse_config\nclass T(TestCase):\n def test_valid(self): self.assertEqual({'enabled':True,'retries':3},parse_config('{\"enabled\":true,\"retries\":3}'))\n def test_extra(self):\n  with self.assertRaises(ValueError): parse_config('{\"enabled\":true,\"retries\":3,\"secret\":\"x\"}')\n def test_bool_is_not_int(self):\n  with self.assertRaises(ValueError): parse_config('{\"enabled\":true,\"retries\":true}')\n",
+        "Validate exact input shapes, types, and bounds before using external data.",
+    ),
+    Exercise(
+        "bounded-api-pagination", "api_reliability", 4,
+        "def collect(fetch):\n    return fetch(None)['items']\n",
+        "def collect(fetch,max_pages=10):\n    if not 1 <= max_pages <= 100: raise ValueError('limit')\n    items=[]; cursor=None; seen=set()\n    for _ in range(max_pages):\n        page=fetch(cursor); items.extend(page.get('items',[])); cursor=page.get('next')\n        if cursor is None: return items\n        if cursor in seen: raise RuntimeError('loop')\n        seen.add(cursor)\n    raise RuntimeError('limit')\n",
+        "from unittest import TestCase\nfrom solution import collect\nclass T(TestCase):\n def test_pages(self):\n  pages={None:{'items':[1],'next':'b'},'b':{'items':[2],'next':None}}; self.assertEqual([1,2],collect(lambda c:pages[c]))\n def test_loop(self):\n  with self.assertRaises(RuntimeError): collect(lambda c:{'items':[],'next':'same'})\n def test_bound(self):\n  with self.assertRaises(RuntimeError): collect(lambda c:{'items':[],'next':str(c)},2)\n",
+        "External pagination must terminate, detect loops, and enforce a hard page cap.",
+    ),
+    Exercise(
+        "safe-relative-path", "filesystem_security", 5,
+        "from pathlib import Path\ndef safe_path(root,supplied): return Path(root)/supplied\n",
+        "from pathlib import Path\ndef safe_path(root,supplied):\n root=Path(root).resolve(); candidate=(root/supplied).resolve()\n if candidate==root or root not in candidate.parents: raise ValueError('escape')\n return candidate\n",
+        "from tempfile import TemporaryDirectory\nfrom unittest import TestCase\nfrom solution import safe_path\nclass T(TestCase):\n def test_child(self):\n  with TemporaryDirectory() as r: self.assertEqual('result.txt',safe_path(r,'out/result.txt').name)\n def test_parent(self):\n  with TemporaryDirectory() as r:\n   with self.assertRaises(ValueError): safe_path(r,'../secret')\n def test_absolute(self):\n  with TemporaryDirectory() as r:\n   with self.assertRaises(ValueError): safe_path(r,'/etc/passwd')\n",
+        "Resolve and verify paths remain inside the disposable workspace.",
+    ),
+    Exercise(
+        "parameterized-sqlite", "database_safety", 5,
+        "def find_user(db,name): return db.execute(f\"SELECT id,name FROM users WHERE name='{name}'\").fetchall()\n",
+        "def find_user(db,name):\n if not isinstance(name,str) or len(name)>100: raise ValueError('name')\n return db.execute('SELECT id,name FROM users WHERE name=?',(name,)).fetchall()\n",
+        "import sqlite3\nfrom unittest import TestCase\nfrom solution import find_user\nclass T(TestCase):\n def setUp(self): self.db=sqlite3.connect(':memory:'); self.db.execute('CREATE TABLE users(id INTEGER,name TEXT)'); self.db.executemany('INSERT INTO users VALUES(?,?)',[(1,'Ada'),(2,'Lin')])\n def tearDown(self): self.db.close()\n def test_exact(self): self.assertEqual([(1,'Ada')],find_user(self.db,'Ada'))\n def test_injection(self): self.assertEqual([],find_user(self.db,\"' OR 1=1 --\"))\n def test_bound(self):\n  with self.assertRaises(ValueError): find_user(self.db,'x'*101)\n",
+        "Use parameterized SQL and validate bounded query inputs.",
+    ),
+    Exercise(
+        "idempotent-job-ledger", "job_reliability", 6,
+        "def process(job_id,ledger,action):\n result=action(); ledger[job_id]=result; return result\n",
+        "def process(job_id,ledger,action):\n if not isinstance(job_id,str) or not job_id or len(job_id)>100: raise ValueError('id')\n if job_id in ledger: return ledger[job_id]\n result=action(); ledger[job_id]=result; return result\n",
+        "from unittest import TestCase\nfrom solution import process\nclass T(TestCase):\n def test_once(self):\n  ledger={}; calls=[]; action=lambda:calls.append(1) or 'done'; self.assertEqual('done',process('j',ledger,action)); self.assertEqual('done',process('j',ledger,action)); self.assertEqual(1,len(calls))\n def test_falsy(self):\n  calls=[]; self.assertEqual(0,process('j',{'j':0},lambda:calls.append(1))); self.assertEqual([],calls)\n def test_id(self):\n  with self.assertRaises(ValueError): process('',{},lambda:None)\n",
+        "Use stable job identities so retries cannot repeat billable or external actions.",
+    ),
 )
 
 
