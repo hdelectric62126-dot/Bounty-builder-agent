@@ -104,6 +104,33 @@ class Store:
               COALESCE(MAX(difficulty),0) max_difficulty FROM practice_runs""").fetchone()
             return dict(row)
 
+    def skill_profile(self):
+        """Summarize only sandbox-verified practice evidence."""
+        languages = {}
+        verified_skills = set()
+        scores = []
+        max_difficulty = 0
+        with self.connect() as db:
+            rows = db.execute("""SELECT category, difficulty, score, result
+              FROM practice_runs WHERE verified_pass=1""").fetchall()
+        language_scores = {}
+        for row in rows:
+            payload = json.loads(row["result"])
+            language = str(payload.get("language") or "unknown")
+            language_scores.setdefault(language, []).append(row["score"])
+            verified_skills.add(row["category"])
+            scores.append(row["score"])
+            max_difficulty = max(max_difficulty, row["difficulty"])
+        for language, values in language_scores.items():
+            languages[language] = {
+                "verified_passes": len(values),
+                "average_score": round(sum(values) / len(values), 1),
+            }
+        return {"verified_skills": sorted(verified_skills), "languages": languages,
+                "verified_passes": len(scores),
+                "average_score": round(sum(scores) / len(scores), 1) if scores else 0,
+                "max_difficulty": max_difficulty}
+
     def reject_unseen_approvals(self, seen_external_ids):
         """Remove stale approvals after a complete scan without deleting history."""
         seen = {str(value) for value in seen_external_ids}
@@ -207,8 +234,9 @@ class Store:
         self.audit("delivery_reviewed", {"opportunity_id": opportunity_id, **decision})
 
     def enqueue_work(self, opportunity_id, deliberation):
-        stage = ("AWAITING_DANIEL_APPROVAL" if deliberation["recommendation"] ==
-                 "QUEUE_FOR_DANIEL_APPROVAL" else "HOLD_FOR_MORE_EVIDENCE")
+        stage = ({"AUTO_APPROVE_ISOLATED_BUILD": "READY_FOR_ISOLATED_BUILD",
+                  "QUEUE_FOR_DANIEL_APPROVAL": "AWAITING_DANIEL_APPROVAL"}
+                 .get(deliberation["recommendation"], "TRAINING_REQUIRED"))
         with self.connect() as db:
             db.execute("""INSERT INTO work_queue VALUES(NULL,?,?,?,?,?)
               ON CONFLICT(opportunity_id) DO UPDATE SET stage=excluded.stage,
