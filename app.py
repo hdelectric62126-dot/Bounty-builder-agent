@@ -27,6 +27,7 @@ from client_job_builder import (ClientJobBuilder, PROFILES, build_schema,
                                 client_readiness, safe_files)
 from policy import evaluate_text
 from authority_engine import capability_certificates, decide_authority
+from teacher_agent import TeacherAgent
 
 DATA_DIR = os.getenv("DATA_DIR", "/data")
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -51,6 +52,7 @@ def execute_practice(files, profile):
 
 
 coding_gym = CodingGym(execute_practice)
+teacher_agent = TeacherAgent()
 
 
 def generate_client_solution(packet):
@@ -257,7 +259,16 @@ def run_training_cycle():
     if store.stats()["approved"]:
         return {"status": "skipped", "reason": "approved_work_available"}
     rounds = max(1, min(int(os.getenv("PRACTICE_ROUNDS_PER_CYCLE", "10")), 20))
-    training_plan = plan_training(EXERCISES, store.practice_history(), rounds)
+    history = store.practice_history()
+    teacher_cycle = teacher_agent.cycle(EXERCISES, history, rounds)
+    store.save_teacher_cycle(teacher_cycle)
+    store.audit("teacher_cycle_completed", {
+        "cycle_id": teacher_cycle["cycle_id"],
+        "status": teacher_cycle["accreditation"]["status"],
+        "qualified_to_teach": teacher_cycle["accreditation"]["qualified_to_teach"],
+        "curriculum_targets": [item["exercise_id"] for item in teacher_cycle["curriculum"]],
+    })
+    training_plan = plan_training(EXERCISES, history, rounds)
     store.audit("adaptive_training_planned", {
         "rounds": len(training_plan),
         "targets": [{k: item[k] for k in ("exercise_id", "category", "language", "reason")}
@@ -346,6 +357,13 @@ def skills():
             "next_training": plan_training(EXERCISES, store.practice_history(), 5)}
 
 
+@app.get("/api/teacher")
+def teacher_status():
+    cycle = teacher_agent.cycle(EXERCISES, store.practice_history(), 10)
+    return {"status": "ok", "teacher": cycle,
+            "stored_cycle": store.latest_teacher_cycle()}
+
+
 @app.get("/api/tools")
 def tool_manifest():
     return {"status": "ok", "tools": [
@@ -363,6 +381,10 @@ def tool_manifest():
         {"name": "tiered_authority_engine", "deterministic": True},
         {"name": "rollback_digest_checkpoint", "deterministic": True},
         {"name": "six_reviewer_consensus", "deterministic": True},
+        {"name": "teacher_curriculum_builder", "deterministic": True},
+        {"name": "hidden_exam_form_issuer", "deterministic": True},
+        {"name": "teacher_internal_accreditation_board", "deterministic": True,
+         "third_party_accreditation": False},
     ]}
 
 
@@ -633,6 +655,7 @@ def payment_cancelled():
 def dashboard():
     stats = store.stats()
     activity = stats["agent_activity"]
+    teacher = teacher_agent.accreditation(EXERCISES, store.practice_history())
     rows = "".join(f"""<tr><td>{escape(x['status'])}</td><td>{x['risk_score']}</td>
       <td><a href='/opportunities/{x['id']}'>{escape(x['title'])}</a><br><small><a href='{escape(x['url'])}'>GitHub source</a></small></td>
       <td>{escape(x['repository'])}</td><td>${x['reward']:.2f}</td>
@@ -660,10 +683,12 @@ def dashboard():
     <div class='card'>Deep deliberations<br><b>{activity['deep_deliberations']}</b></div>
     <div class='card'>Practice drills<br><b>{activity['practice']['drills']}</b></div>
     <div class='card'>Verified practice passes<br><b>{activity['practice']['verified_passes']}</b></div>
-    <div class='card'>Practice score<br><b>{activity['practice']['average_score']}</b></div></div>
+    <div class='card'>Practice score<br><b>{activity['practice']['average_score']}</b></div>
+    <div class='card'>Teacher status<br><b>{teacher['status']}</b></div>
+    <div class='card'>Qualified teaching skills<br><b>{len(teacher['qualified_to_teach'])}</b></div></div>
     <table><thead><tr><th>Status</th><th>Score</th><th>Task</th><th>Repository</th><th>Reward</th><th>Expected value</th><th>License</th><th>Decision</th></tr></thead>
     <tbody>{rows or '<tr><td colspan=8>First scan is starting…</td></tr>'}</tbody></table>
-    <p><a href='/work-queue'>Review deep-thinking work queue</a> · <a href='/audit'>View complete audit feed</a></p></body></html>"""
+    <p><a href='/api/teacher'>View Teacher Agent evidence</a> · <a href='/work-queue'>Review deep-thinking work queue</a> · <a href='/audit'>View complete audit feed</a></p></body></html>"""
 
 
 @app.get("/work-queue", response_class=HTMLResponse)

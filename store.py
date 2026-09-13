@@ -65,6 +65,10 @@ CREATE TABLE IF NOT EXISTS practice_runs (
 );
 CREATE INDEX IF NOT EXISTS idx_practice_exercise_created
  ON practice_runs(exercise_id, created_at);
+CREATE TABLE IF NOT EXISTS teacher_cycles (
+ id INTEGER PRIMARY KEY AUTOINCREMENT, cycle_id TEXT UNIQUE, status TEXT,
+ curriculum TEXT, accreditation TEXT, created_at TEXT
+);
 """
 
 
@@ -129,6 +133,31 @@ class Store:
         with self.connect() as db:
             rows = db.execute("SELECT result FROM practice_runs ORDER BY id").fetchall()
         return [json.loads(row["result"]) for row in rows]
+
+    def save_teacher_cycle(self, cycle):
+        accreditation = cycle["accreditation"]
+        with self.connect() as db:
+            cursor = db.execute("""INSERT OR IGNORE INTO teacher_cycles
+              VALUES(NULL,?,?,?,?,?)""", (cycle["cycle_id"], accreditation["status"],
+              json.dumps(cycle["curriculum"]), json.dumps(accreditation), now()))
+        return cursor.rowcount
+
+    def latest_teacher_cycle(self):
+        with self.connect() as db:
+            row = db.execute("SELECT * FROM teacher_cycles ORDER BY id DESC LIMIT 1").fetchone()
+        if not row:
+            return None
+        item = dict(row)
+        item["curriculum"] = json.loads(item["curriculum"])
+        item["accreditation"] = json.loads(item["accreditation"])
+        return item
+
+    def teacher_stats(self):
+        with self.connect() as db:
+            row = db.execute("""SELECT COUNT(*) cycles,
+              COALESCE(SUM(status='ACCREDITED'),0) accredited_cycles
+              FROM teacher_cycles""").fetchone()
+        return dict(row)
 
     def skill_profile(self):
         """Summarize only sandbox-verified practice evidence."""
@@ -302,6 +331,7 @@ class Store:
                 "delivery_reviews": db.execute("SELECT COUNT(*) FROM work_reviews").fetchone()[0],
                 "deep_deliberations": db.execute("SELECT COUNT(*) FROM work_queue").fetchone()[0],
                 "practice": self.practice_stats(),
+                "teacher": self.teacher_stats(),
             }
 
     def stats(self):

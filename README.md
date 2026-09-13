@@ -36,6 +36,13 @@ endpoint so projected value never gets confused with money actually earned.
 - Adaptive practice spends disposable VM runs on unverified skills first, then
   language evidence gaps, mastery confirmation, and spaced refreshes. The next
   five targets and their reasons are visible through `GET /api/skills`.
+- The Teacher Agent turns that evidence into targeted lessons, remediation, and
+  separate exam forms. `GET /api/teacher` publishes what it is qualified to teach,
+  what remains unverified, and its domain-by-domain evidence.
+- Teacher accreditation follows the transparent `BBA-INTERNAL-TEACHER-1` standard:
+  at least three passes, two exam forms, sufficient difficulty, and a 90 average.
+  This is internal evidence accreditation, not recognition by a school, government,
+  or professional licensing body. It cannot modify policy or take external actions.
 - Discovery, historical study, and adaptive training run in separate workers, so
   a slow external API cannot stall the other jobs. SQLite uses WAL plus a bounded
   busy timeout for safe concurrent reads and audit writes.
