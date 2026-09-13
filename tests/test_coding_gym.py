@@ -7,6 +7,11 @@ from store import Store
 
 
 class CodingGymTests(unittest.TestCase):
+    def test_curriculum_covers_practical_verified_skills(self):
+        categories = {exercise.category for exercise in EXERCISES}
+        self.assertTrue({"input_validation", "api_reliability", "filesystem_security",
+                         "database_safety", "job_reliability"}.issubset(categories))
+
     def test_normalizes_gateway_status_case(self):
         calls = iter([
             {"status": "failed", "network": "railway_vm_isolated"},
