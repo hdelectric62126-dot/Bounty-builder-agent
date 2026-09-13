@@ -2,6 +2,7 @@
 
 import os
 import re
+from decimal import Decimal, InvalidOperation
 import requests
 from policy import evaluate_source, evaluate_text, license_allowed
 from repository_analyst import RepositoryAnalyst
@@ -9,6 +10,19 @@ from risk_compliance_agent import OpportunityRiskInput, evaluate_risk
 from solution_planner import create_solution_plan
 
 REWARD = re.compile(r"(?:\$|USD\s*)([0-9][0-9,]*(?:\.[0-9]{1,2})?)", re.I)
+MAX_VERIFIED_REWARD = Decimal("100000")
+
+
+def parse_reward_claim(text: str) -> tuple[float, bool]:
+    """Return a bounded reward and whether every monetary claim was plausible."""
+    values = []
+    try:
+        values = [Decimal(value.replace(",", "")) for value in REWARD.findall(text)]
+    except InvalidOperation:
+        return 0.0, False
+    if any(value > MAX_VERIFIED_REWARD for value in values):
+        return 0.0, False
+    return float(max(values, default=Decimal("0"))), True
 
 
 class GitHubDiscovery:
@@ -44,8 +58,8 @@ class GitHubDiscovery:
         competition = self._competition(raw, repo)
         spdx = (repo_data.get("license") or {}).get("spdx_id")
         licensing = license_allowed(spdx)
-        money = REWARD.findall(f"{raw.get('title','')} {raw.get('body') or ''}")
-        reward = max([float(value.replace(',', '')) for value in money] or [0.0])
+        reward, reward_claim_valid = parse_reward_claim(
+            f"{raw.get('title','')} {raw.get('body') or ''}")
         labels = {label["name"].lower() for label in raw.get("labels", [])}
         tests = any(word in (raw.get("body") or "").lower() for word in ("test", "pytest", "unit test"))
         analysis = RepositoryAnalyst().analyze(repository=repo_data, issue=raw).to_dict()
@@ -59,6 +73,7 @@ class GitHubDiscovery:
             assigned=competition["assigned"],
             competing_pull_requests=competition["linked_pull_requests"],
             competition_data_complete=competition["timeline_complete"],
+            reward_claim_valid=reward_claim_valid,
         ))
         item = {
             "external_id": str(raw["id"]), "title": raw["title"], "url": raw["html_url"],
