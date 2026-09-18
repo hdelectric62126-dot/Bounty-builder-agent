@@ -32,7 +32,13 @@ from revenue_capital_agent import evaluate_capital
 from database_migration import migrate_sqlite_to_postgres
 
 DATA_DIR = os.getenv("DATA_DIR", "/data")
-os.makedirs(DATA_DIR, exist_ok=True)
+try:
+    os.makedirs(DATA_DIR, exist_ok=True)
+except PermissionError:
+    # CI/local environments may not have Railway's /data volume.
+    # Production still uses /data when the mounted volume is writable.
+    DATA_DIR = os.path.join(os.getcwd(), ".data")
+    os.makedirs(DATA_DIR, exist_ok=True)
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 store = Store(DATABASE_URL or os.path.join(DATA_DIR, "bounty_builder.db"))
 database_migration = migrate_sqlite_to_postgres(
