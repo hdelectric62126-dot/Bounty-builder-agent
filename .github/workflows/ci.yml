@@ -30,7 +30,10 @@ jobs:
       - name: Run the complete test suite
         env:
           PYTHONDONTWRITEBYTECODE: "1"
-        run: python -m unittest discover -s tests -v
+          DATA_DIR: ${{ runner.temp }}/bounty-builder-data
+        run: |
+          mkdir -p "$DATA_DIR"
+          python -m unittest discover -s tests -v
 
   dependency-audit:
     runs-on: ubuntu-latest
