@@ -19,3 +19,5 @@ class IsolationSmokeTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+# Pull-request smoke verification.
