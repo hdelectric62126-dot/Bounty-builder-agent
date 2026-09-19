@@ -98,6 +98,25 @@ class LocalAssistantTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.memory.record_decision("Target", "Railway", status="maybe")
 
+    def test_task_ledger_reuses_active_work_and_records_completion(self):
+        first = self.memory.start_task("Upgrade assistant memory", "Initial pass")
+        second = self.memory.start_task("  upgrade ASSISTANT memory  ")
+        self.assertEqual(first["task_id"], second["task_id"])
+        self.assertTrue(second["reused"])
+        completed = self.memory.update_task(
+            first["task_id"], "completed", "Verified", ["140 tests", "commit:abc"]
+        )
+        self.assertEqual(completed["status"], "completed")
+        self.assertEqual(len(self.memory.list_tasks("active")), 0)
+        self.assertEqual(self.memory.list_tasks("completed")[0]["evidence"],
+                         ["140 tests", "commit:abc"])
+
+    def test_context_includes_active_tasks(self):
+        task = self.memory.start_task("Prevent repeated work")
+        bundle = self.memory.context_bundle("What is active?")
+        self.assertEqual(bundle["active_tasks"][0]["task_id"], task["task_id"])
+        self.assertEqual(self.memory.status()["active_tasks"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

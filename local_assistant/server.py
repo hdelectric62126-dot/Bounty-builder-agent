@@ -61,5 +61,24 @@ def record_decision(title: str, decision: str, evidence: list[str] | None = None
     return memory.record_decision(title, decision, evidence, status)
 
 
+@mcp.tool()
+def start_task(objective: str, note: str = "") -> dict:
+    """Start or resume one durable task without duplicating active work."""
+    return memory.start_task(objective, note)
+
+
+@mcp.tool()
+def update_task(task_id: str, status: str, note: str = "",
+                evidence: list[str] | None = None) -> dict:
+    """Update task state and append verification evidence."""
+    return memory.update_task(task_id, status, note, evidence)
+
+
+@mcp.tool()
+def list_tasks(status: str | None = None, limit: int = 20) -> list[dict]:
+    """List durable tasks, optionally filtered by state."""
+    return memory.list_tasks(status, limit)
+
+
 if __name__ == "__main__":
     mcp.run(transport="stdio")

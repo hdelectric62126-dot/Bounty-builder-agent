@@ -37,6 +37,18 @@ def build_parser() -> argparse.ArgumentParser:
     cache.add_argument("question")
     cache.add_argument("answer")
     cache.add_argument("--evidence", action="append", default=[])
+
+    task_start = commands.add_parser("task-start")
+    task_start.add_argument("objective")
+    task_start.add_argument("--note", default="")
+    task_update = commands.add_parser("task-update")
+    task_update.add_argument("task_id")
+    task_update.add_argument("status", choices=("active", "completed", "blocked", "cancelled"))
+    task_update.add_argument("--note", default="")
+    task_update.add_argument("--evidence", action="append", default=[])
+    tasks = commands.add_parser("tasks")
+    tasks.add_argument("--status", choices=("active", "completed", "blocked", "cancelled"))
+    tasks.add_argument("--limit", type=int, default=20)
     return parser
 
 
@@ -53,6 +65,12 @@ def execute(args: argparse.Namespace, memory: LocalMemory) -> dict:
         return memory.record_decision(args.title, args.decision, args.evidence, args.status)
     if args.command == "cache":
         return memory.cache_answer(args.question, args.answer, args.evidence)
+    if args.command == "task-start":
+        return memory.start_task(args.objective, args.note)
+    if args.command == "task-update":
+        return memory.update_task(args.task_id, args.status, args.note, args.evidence)
+    if args.command == "tasks":
+        return {"tasks": memory.list_tasks(args.status, args.limit)}
     raise ValueError(f"unsupported command: {args.command}")
 
 

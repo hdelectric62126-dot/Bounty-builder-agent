@@ -62,6 +62,9 @@ rejected automatically instead of being returned as current.
   with one request before starting work.
 - `record_decision` — persist an active, tentative, or superseded decision with its
   evidence so later sessions do not silently reverse it.
+- `start_task` — create or resume a durable task without duplicating active work.
+- `update_task` — record task state, progress notes, and verification evidence.
+- `list_tasks` — show active, completed, blocked, or cancelled work across sessions.
 
 Environment variables: `LOCAL_ASSISTANT_DATA_DIR`, `LOCAL_ASSISTANT_OLLAMA_URL`,
 and `LOCAL_ASSISTANT_EMBED_MODEL`.
@@ -75,6 +78,9 @@ still use the same memory immediately:
 python -m local_assistant.cli ingest .
 python -m local_assistant.cli context "current task"
 python -m local_assistant.cli decision "Decision title" "Decision text" --evidence source
+python -m local_assistant.cli task-start "Objective" --note "Current state"
+python -m local_assistant.cli task-update TASK_ID completed --evidence "tests passed"
+python -m local_assistant.cli tasks --status active
 ```
 
 The bridge writes to `.data/local-assistant/memory.db` by default. That directory

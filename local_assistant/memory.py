@@ -85,6 +85,12 @@ class LocalMemory:
               root TEXT NOT NULL, source TEXT NOT NULL, content_hash TEXT NOT NULL,
               updated_at TEXT NOT NULL, PRIMARY KEY(root, source)
             );
+            CREATE TABLE IF NOT EXISTS tasks (
+              task_id TEXT PRIMARY KEY, objective TEXT NOT NULL, status TEXT NOT NULL,
+              note TEXT NOT NULL, evidence TEXT NOT NULL, created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status, updated_at);
             """)
             cache_columns = {row[1] for row in db.execute("PRAGMA table_info(answer_cache)")}
             if "evidence_state" not in cache_columns:
@@ -249,7 +255,58 @@ class LocalMemory:
         if not query:
             raise ValueError("query is required")
         return {"query": query, "cached_answer": self.lookup_answer(query, cache_threshold),
-                "evidence": self.search(query, limit), "memory": self.status()}
+                "evidence": self.search(query, limit), "active_tasks": self.list_tasks("active", 10),
+                "memory": self.status()}
+
+    def start_task(self, objective: str, note: str = "") -> dict:
+        objective = objective.strip()
+        if not objective:
+            raise ValueError("objective is required")
+        normalized = " ".join(objective.casefold().split())
+        task_id = hashlib.sha256(normalized.encode()).hexdigest()[:12]
+        with self._connect() as db:
+            existing = db.execute("SELECT * FROM tasks WHERE task_id=?", (task_id,)).fetchone()
+            if existing and existing["status"] == "active":
+                return {**dict(existing), "evidence": json.loads(existing["evidence"]), "reused": True}
+            now = _now()
+            db.execute("""INSERT INTO tasks(task_id,objective,status,note,evidence,created_at,updated_at)
+                VALUES(?,?, 'active', ?, '[]', ?, ?)
+                ON CONFLICT(task_id) DO UPDATE SET status='active',note=excluded.note,
+                evidence='[]',created_at=excluded.created_at,updated_at=excluded.updated_at""",
+                (task_id, objective, note.strip(), now, now))
+        return {"task_id": task_id, "objective": objective, "status": "active",
+                "note": note.strip(), "evidence": [], "created_at": now,
+                "updated_at": now, "reused": False}
+
+    def update_task(self, task_id: str, status: str, note: str = "",
+                    evidence: list[str] | None = None) -> dict:
+        if status not in {"active", "completed", "blocked", "cancelled"}:
+            raise ValueError("status must be active, completed, blocked, or cancelled")
+        with self._connect() as db:
+            row = db.execute("SELECT * FROM tasks WHERE task_id=?", (task_id,)).fetchone()
+            if row is None:
+                raise ValueError("unknown task_id")
+            merged = list(dict.fromkeys(json.loads(row["evidence"]) + (evidence or [])))
+            next_note = note.strip() or row["note"]
+            updated = _now()
+            db.execute("UPDATE tasks SET status=?,note=?,evidence=?,updated_at=? WHERE task_id=?",
+                       (status, next_note, json.dumps(merged), updated, task_id))
+        return {"task_id": task_id, "objective": row["objective"], "status": status,
+                "note": next_note, "evidence": merged, "created_at": row["created_at"],
+                "updated_at": updated}
+
+    def list_tasks(self, status: str | None = None, limit: int = 20) -> list[dict]:
+        if status is not None and status not in {"active", "completed", "blocked", "cancelled"}:
+            raise ValueError("invalid task status")
+        query, params = "SELECT * FROM tasks", []
+        if status:
+            query += " WHERE status=?"
+            params.append(status)
+        query += " ORDER BY updated_at DESC LIMIT ?"
+        params.append(max(1, min(limit, 100)))
+        with self._connect() as db:
+            rows = db.execute(query, params).fetchall()
+        return [{**dict(row), "evidence": json.loads(row["evidence"])} for row in rows]
 
     def lookup_answer(self, question: str, threshold: float = 0.84) -> dict:
         embedded = self.embedder.embed(question)
@@ -285,7 +342,9 @@ class LocalMemory:
         with self._connect() as db:
             docs = db.execute("SELECT COUNT(*) count, COUNT(DISTINCT source) sources FROM documents").fetchone()
             cache = db.execute("SELECT COUNT(*) count, COALESCE(SUM(hits),0) hits FROM answer_cache").fetchone()
+            tasks = db.execute("SELECT COUNT(*) count FROM tasks WHERE status='active'").fetchone()
             providers = [row[0] for row in db.execute("SELECT DISTINCT embedding_provider FROM documents")]
         return {"documents": docs["count"], "sources": docs["sources"],
                 "cached_answers": cache["count"], "cache_hits": cache["hits"],
+                "active_tasks": tasks["count"],
                 "providers": providers or ["not-yet-used"], "database": self.path}

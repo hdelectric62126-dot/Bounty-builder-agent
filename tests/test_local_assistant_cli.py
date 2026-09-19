@@ -37,6 +37,17 @@ class LocalAssistantCliTests(unittest.TestCase):
         result = execute(args, self.memory)
         self.assertEqual(result["status"], "active")
 
+    def test_shell_agent_can_track_task_lifecycle(self):
+        started = execute(self.parser.parse_args([
+            "task-start", "Finish the upgrade", "--note", "Do not repeat work"
+        ]), self.memory)
+        finished = execute(self.parser.parse_args([
+            "task-update", started["task_id"], "completed", "--evidence", "tests passed"
+        ]), self.memory)
+        self.assertEqual(finished["status"], "completed")
+        tasks = execute(self.parser.parse_args(["tasks", "--status", "completed"]), self.memory)
+        self.assertEqual(tasks["tasks"][0]["evidence"], ["tests passed"])
+
 
 if __name__ == "__main__":
     unittest.main()
