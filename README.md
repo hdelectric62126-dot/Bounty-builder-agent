@@ -1,5 +1,12 @@
 # Bounty Builder Agent
 
+## Local Operations Assistant
+
+Codex can now be the first consumer of a standalone local memory and semantic
+cache. It connects through MCP, keeps its database on Daniel's PC, uses Ollama
+embeddings when available, and can index this repository as its first knowledge
+source. Setup and tool details are in [LOCAL_ASSISTANT.md](LOCAL_ASSISTANT.md).
+
 An approval-gated revenue opportunity system powered by a six-agent team:
 
 - **Bounty Builder** orchestrates storage, audits, and the dashboard.
