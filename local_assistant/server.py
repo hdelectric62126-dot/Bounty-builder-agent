@@ -20,7 +20,7 @@ def memory_status() -> dict:
 
 @mcp.tool()
 def ingest_project(root: str) -> dict:
-    """Index safe text/code files beneath one explicit local project directory."""
+    """Incrementally sync safe text/code files and remove deleted-file memory."""
     return memory.ingest_directory(root)
 
 
@@ -46,6 +46,19 @@ def cache_lookup(question: str, threshold: float = 0.84) -> dict:
 def cache_verified_answer(question: str, answer: str, evidence: list[str] | None = None) -> dict:
     """Cache a completed answer with its evidence after verification."""
     return memory.cache_answer(question, answer, evidence)
+
+
+@mcp.tool()
+def get_task_context(query: str, limit: int = 6, cache_threshold: float = 0.84) -> dict:
+    """Return verified cache state, relevant evidence, and memory health in one call."""
+    return memory.context_bundle(query, limit, cache_threshold)
+
+
+@mcp.tool()
+def record_decision(title: str, decision: str, evidence: list[str] | None = None,
+                    status: str = "active") -> dict:
+    """Persist an explicit project decision with evidence and lifecycle status."""
+    return memory.record_decision(title, decision, evidence, status)
 
 
 if __name__ == "__main__":

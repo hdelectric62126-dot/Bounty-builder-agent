@@ -42,6 +42,43 @@ class LocalAssistantTests(unittest.TestCase):
         self.assertEqual(report["files"], 1)
         self.assertEqual(self.memory.status()["sources"], 1)
 
+    def test_directory_sync_is_incremental_and_removes_deleted_files(self):
+        root = Path(self.temp.name) / "project"
+        root.mkdir()
+        source = root / "README.md"
+        source.write_text("first version", encoding="utf-8")
+        first = self.memory.ingest_directory(root)
+        second = self.memory.ingest_directory(root)
+        self.assertEqual(first["indexed"], 1)
+        self.assertEqual(second["indexed"], 0)
+        self.assertEqual(second["unchanged"], 1)
+        source.unlink()
+        third = self.memory.ingest_directory(root)
+        self.assertEqual(third["removed"], 1)
+        self.assertEqual(self.memory.status()["sources"], 0)
+
+    def test_verified_cache_updates_duplicate_question(self):
+        first = self.memory.cache_answer("What passed?", "Old answer", ["old.log"])
+        second = self.memory.cache_answer(" what passed? ", "New answer", ["new.log"])
+        self.assertEqual(first["cache_id"], second["cache_id"])
+        self.assertTrue(second["updated"])
+        self.assertEqual(self.memory.status()["cached_answers"], 1)
+        hit = self.memory.lookup_answer("What passed?", threshold=0.8)
+        self.assertEqual(hit["answer"], "New answer")
+
+    def test_decision_and_context_bundle(self):
+        recorded = self.memory.record_decision(
+            "Deployment target", "Railway remains the production target.", ["railway.json"]
+        )
+        self.assertEqual(recorded["status"], "active")
+        bundle = self.memory.context_bundle("Where do we deploy?", limit=3)
+        self.assertIn("cached_answer", bundle)
+        self.assertTrue(any(item["source"].startswith("decisions/") for item in bundle["evidence"]))
+
+    def test_decision_rejects_unknown_status(self):
+        with self.assertRaises(ValueError):
+            self.memory.record_decision("Target", "Railway", status="maybe")
+
 
 if __name__ == "__main__":
     unittest.main()

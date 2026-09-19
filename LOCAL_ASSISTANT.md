@@ -41,14 +41,22 @@ Restart Codex, call `memory_status`, then call `ingest_project` with the absolut
 path to the Bounty Builder checkout. The tools never deploy, merge, submit work,
 spend money, or weaken the existing approval gates.
 
+Project ingestion is incremental: unchanged files are not embedded again, changed
+files are refreshed, and deleted files are removed from memory. This keeps answers
+current while reducing repeated local work.
+
 ## Exposed tools
 
 - `memory_status` — memory/cache health and active embedding provider.
-- `ingest_project` — index supported text and code files from an explicit path.
+- `ingest_project` — incrementally synchronize supported files from an explicit path.
 - `remember` — save a trusted decision or project note.
 - `recall` — retrieve relevant evidence before work begins.
 - `cache_lookup` — reuse a sufficiently similar verified answer.
 - `cache_verified_answer` — store a completed answer and evidence.
+- `get_task_context` — retrieve cache state, supporting evidence, and memory health
+  with one request before starting work.
+- `record_decision` — persist an active, tentative, or superseded decision with its
+  evidence so later sessions do not silently reverse it.
 
 Environment variables: `LOCAL_ASSISTANT_DATA_DIR`, `LOCAL_ASSISTANT_OLLAMA_URL`,
 and `LOCAL_ASSISTANT_EMBED_MODEL`.

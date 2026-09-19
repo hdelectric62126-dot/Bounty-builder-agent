@@ -81,6 +81,10 @@ class LocalMemory:
               created_at TEXT NOT NULL, last_used_at TEXT NOT NULL, hits INTEGER NOT NULL DEFAULT 0
             );
             CREATE INDEX IF NOT EXISTS idx_documents_source ON documents(source);
+            CREATE TABLE IF NOT EXISTS project_files (
+              root TEXT NOT NULL, source TEXT NOT NULL, content_hash TEXT NOT NULL,
+              updated_at TEXT NOT NULL, PRIMARY KEY(root, source)
+            );
             """)
 
     def _connect(self):
@@ -113,20 +117,51 @@ class LocalMemory:
         root = Path(root).resolve()
         if not root.is_dir():
             raise ValueError("root must be an existing directory")
-        files = chunks = skipped = 0
+        root_key = str(root)
+        root_fingerprint = hashlib.sha256(root_key.encode()).hexdigest()[:10]
+        prefix = f"{root.name or 'project'}@{root_fingerprint}"
+        files = chunks = skipped = unchanged = 0
+        discovered: set[str] = set()
+        with self._connect() as db:
+            known = {row["source"]: row["content_hash"] for row in db.execute(
+                "SELECT source, content_hash FROM project_files WHERE root=?", (root_key,)
+            )}
         for path in sorted(root.rglob("*")):
-            if not path.is_file() or path.suffix.lower() not in TEXT_SUFFIXES or any(part in SKIP_PARTS for part in path.parts):
+            if (path.is_symlink() or not path.is_file() or path.suffix.lower() not in TEXT_SUFFIXES
+                    or any(part in SKIP_PARTS for part in path.parts)):
                 continue
             if path.stat().st_size > max_file_bytes:
                 skipped += 1
                 continue
             try:
-                result = self.remember(str(path.relative_to(root)), path.read_text(encoding="utf-8"))
+                relative = path.relative_to(root).as_posix()
+                source = f"{prefix}/{relative}"
+                text = path.read_text(encoding="utf-8")
+                content_hash = hashlib.sha256(text.encode()).hexdigest()
+                discovered.add(source)
+                if known.get(source) == content_hash:
+                    files += 1
+                    unchanged += 1
+                    continue
+                result = self.remember(source, text)
+                with self._connect() as db:
+                    db.execute("""INSERT INTO project_files(root,source,content_hash,updated_at)
+                        VALUES(?,?,?,?) ON CONFLICT(root,source) DO UPDATE SET
+                        content_hash=excluded.content_hash, updated_at=excluded.updated_at""",
+                        (root_key, source, content_hash, _now()))
                 files += 1
                 chunks += result["chunks"]
             except UnicodeDecodeError:
                 skipped += 1
-        return {"root": str(root), "files": files, "chunks": chunks, "skipped": skipped}
+        stale = set(known) - discovered
+        if stale:
+            with self._connect() as db:
+                db.executemany("DELETE FROM documents WHERE source=?", [(source,) for source in stale])
+                db.executemany("DELETE FROM project_files WHERE root=? AND source=?",
+                               [(root_key, source) for source in stale])
+        return {"root": root_key, "files": files, "indexed": files - unchanged,
+                "unchanged": unchanged, "removed": len(stale), "chunks": chunks,
+                "skipped": skipped}
 
     def search(self, query: str, limit: int = 6) -> list[dict]:
         query_embedding = self.embedder.embed(query)
@@ -143,13 +178,47 @@ class LocalMemory:
         return sorted(results, key=lambda item: item["score"], reverse=True)[:max(1, min(limit, 20))]
 
     def cache_answer(self, question: str, answer: str, evidence: list[str] | None = None) -> dict:
+        question = question.strip()
+        answer = answer.strip()
+        if not question or not answer:
+            raise ValueError("question and answer are required")
         embedded = self.embedder.embed(question)
         with self._connect() as db:
+            existing = db.execute(
+                "SELECT id FROM answer_cache WHERE lower(trim(question))=lower(trim(?)) ORDER BY id DESC LIMIT 1",
+                (question,),
+            ).fetchone()
+            if existing:
+                db.execute("""UPDATE answer_cache SET answer=?,evidence=?,question_embedding=?,
+                    embedding_provider=?,created_at=?,last_used_at=?,hits=0 WHERE id=?""",
+                    (answer, json.dumps(evidence or []), json.dumps(embedded.vector),
+                     embedded.provider, _now(), _now(), existing["id"]))
+                return {"cache_id": existing["id"], "provider": embedded.provider, "updated": True}
             cursor = db.execute("""INSERT INTO answer_cache
               (question,answer,evidence,question_embedding,embedding_provider,created_at,last_used_at,hits)
               VALUES(?,?,?,?,?,?,?,0)""", (question, answer, json.dumps(evidence or []),
               json.dumps(embedded.vector), embedded.provider, _now(), _now()))
-        return {"cache_id": cursor.lastrowid, "provider": embedded.provider}
+        return {"cache_id": cursor.lastrowid, "provider": embedded.provider, "updated": False}
+
+    def record_decision(self, title: str, decision: str, evidence: list[str] | None = None,
+                        status: str = "active") -> dict:
+        title, decision = title.strip(), decision.strip()
+        if not title or not decision:
+            raise ValueError("title and decision are required")
+        if status not in {"active", "superseded", "tentative"}:
+            raise ValueError("status must be active, superseded, or tentative")
+        slug = re.sub(r"[^a-z0-9]+", "-", title.casefold()).strip("-")[:72] or "decision"
+        payload = {"title": title, "decision": decision, "evidence": evidence or [],
+                   "status": status, "recorded_at": _now()}
+        result = self.remember(f"decisions/{slug}.json", json.dumps(payload, indent=2))
+        return {"source": result["source"], "status": status}
+
+    def context_bundle(self, query: str, limit: int = 6, cache_threshold: float = 0.84) -> dict:
+        query = query.strip()
+        if not query:
+            raise ValueError("query is required")
+        return {"query": query, "cached_answer": self.lookup_answer(query, cache_threshold),
+                "evidence": self.search(query, limit), "memory": self.status()}
 
     def lookup_answer(self, question: str, threshold: float = 0.84) -> dict:
         embedded = self.embedder.embed(question)
