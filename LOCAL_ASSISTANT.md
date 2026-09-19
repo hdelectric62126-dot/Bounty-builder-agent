@@ -5,7 +5,21 @@ Builder is the first project it indexes. Data stays in a local SQLite database.
 Ollama embeddings provide semantic retrieval and answer caching; lexical retrieval
 keeps the server useful when Ollama is unavailable.
 
-## Windows setup
+## Windows one-click setup
+
+1. Install Python 3.11 or newer, Ollama, and the Codex CLI if they are not already installed.
+2. Open the Bounty Builder repository folder.
+3. Double-click `install_local_assistant.cmd`.
+4. When it reports success, completely restart ChatGPT or Codex and open a new session.
+5. Call `memory_status`, then call `ingest_project` with the absolute path to the
+   Bounty Builder checkout.
+
+The installer creates a private Python environment, installs the required packages,
+downloads the local embedding model, registers the MCP server, and verifies that
+Codex lists it. It uses its own repository location, so no path editing or command
+typing is required.
+
+## Manual Windows setup
 
 ```powershell
 py -m venv .venv
