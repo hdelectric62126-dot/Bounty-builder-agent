@@ -60,3 +60,17 @@ current while reducing repeated local work.
 
 Environment variables: `LOCAL_ASSISTANT_DATA_DIR`, `LOCAL_ASSISTANT_OLLAMA_URL`,
 and `LOCAL_ASSISTANT_EMBED_MODEL`.
+
+## Shell-agent bridge
+
+Agents running in a workspace that cannot dynamically mount a new MCP server can
+still use the same memory immediately:
+
+```bash
+python -m local_assistant.cli ingest .
+python -m local_assistant.cli context "current task"
+python -m local_assistant.cli decision "Decision title" "Decision text" --evidence source
+```
+
+The bridge writes to `.data/local-assistant/memory.db` by default. That directory
+is ignored by Git and never becomes part of a commit.
