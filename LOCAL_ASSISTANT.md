@@ -45,6 +45,11 @@ Project ingestion is incremental: unchanged files are not embedded again, change
 files are refreshed, and deleted files are removed from memory. This keeps answers
 current while reducing repeated local work.
 
+Retrieval combines semantic and keyword relevance and reports both component
+scores plus source timestamps. Verified-answer cache entries snapshot any indexed
+evidence they cite; if that evidence changes or disappears, the cached answer is
+rejected automatically instead of being returned as current.
+
 ## Exposed tools
 
 - `memory_status` — memory/cache health and active embedding provider.

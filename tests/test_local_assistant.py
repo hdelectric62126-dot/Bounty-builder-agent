@@ -32,6 +32,25 @@ class LocalAssistantTests(unittest.TestCase):
         self.assertEqual(hit["evidence"], ["policy.md"])
         self.assertFalse(self.memory.lookup_answer("sandbox network rules", threshold=0.9)["hit"])
 
+    def test_cache_is_invalidated_when_tracked_evidence_changes(self):
+        self.memory.remember("policy.md", "Daniel approval is required.")
+        cached = self.memory.cache_answer(
+            "Is approval required?", "Yes.", ["policy.md"]
+        )
+        self.assertEqual(cached["tracked_evidence"], 1)
+        self.assertTrue(self.memory.lookup_answer("Is approval required?", threshold=0.8)["hit"])
+        self.memory.remember("policy.md", "Approval policy changed.")
+        stale = self.memory.lookup_answer("Is approval required?", threshold=0.8)
+        self.assertFalse(stale["hit"])
+        self.assertEqual(stale["stale_candidates"], 1)
+
+    def test_search_reports_hybrid_scores_and_freshness(self):
+        self.memory.remember("policy.md", "Client payment requires Daniel approval.")
+        result = self.memory.search("client payment approval", 1)[0]
+        self.assertIn("lexical_score", result)
+        self.assertIn("semantic_score", result)
+        self.assertIn("updated_at", result)
+
     def test_directory_ingest_skips_private_runtime_directories(self):
         root = Path(self.temp.name) / "project"
         root.mkdir()

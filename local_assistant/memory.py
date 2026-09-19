@@ -86,6 +86,9 @@ class LocalMemory:
               updated_at TEXT NOT NULL, PRIMARY KEY(root, source)
             );
             """)
+            cache_columns = {row[1] for row in db.execute("PRAGMA table_info(answer_cache)")}
+            if "evidence_state" not in cache_columns:
+                db.execute("ALTER TABLE answer_cache ADD COLUMN evidence_state TEXT NOT NULL DEFAULT '[]'")
 
     def _connect(self):
         db = sqlite3.connect(self.path)
@@ -168,14 +171,39 @@ class LocalMemory:
         with self._connect() as db:
             rows = db.execute("SELECT * FROM documents").fetchall()
         results = []
+        query_tokens = set(TOKEN.findall(query.casefold()))
         for row in rows:
             lexical = _lexical(query, row["content"])
             vector = _cosine(query_embedding.vector, json.loads(row["embedding"] or "[]"))
-            score = vector if vector else lexical
+            score = (0.72 * vector + 0.28 * lexical) if vector else lexical
+            content_tokens = set(TOKEN.findall(row["content"].casefold()))
+            if query_tokens and query_tokens.issubset(content_tokens):
+                score = min(1.0, score + 0.08)
             if score > 0:
                 results.append({"source": row["source"], "chunk": row["chunk_index"],
-                                "score": round(score, 4), "content": row["content"]})
+                                "score": round(score, 4), "lexical_score": round(lexical, 4),
+                                "semantic_score": round(vector, 4), "updated_at": row["updated_at"],
+                                "content": row["content"]})
         return sorted(results, key=lambda item: item["score"], reverse=True)[:max(1, min(limit, 20))]
+
+    @staticmethod
+    def _evidence_snapshot(db: sqlite3.Connection, evidence: list[str]) -> list[dict]:
+        snapshot = []
+        for source in evidence:
+            rows = db.execute(
+                "SELECT content_hash FROM documents WHERE source=? ORDER BY chunk_index", (source,)
+            ).fetchall()
+            if rows:
+                digest = hashlib.sha256("".join(row["content_hash"] for row in rows).encode()).hexdigest()
+                snapshot.append({"source": source, "digest": digest})
+        return snapshot
+
+    @classmethod
+    def _evidence_is_current(cls, db: sqlite3.Connection, state: list[dict]) -> bool:
+        if not state:
+            return True
+        sources = [item["source"] for item in state]
+        return cls._evidence_snapshot(db, sources) == state
 
     def cache_answer(self, question: str, answer: str, evidence: list[str] | None = None) -> dict:
         question = question.strip()
@@ -184,21 +212,24 @@ class LocalMemory:
             raise ValueError("question and answer are required")
         embedded = self.embedder.embed(question)
         with self._connect() as db:
+            evidence = evidence or []
+            evidence_state = self._evidence_snapshot(db, evidence)
             existing = db.execute(
                 "SELECT id FROM answer_cache WHERE lower(trim(question))=lower(trim(?)) ORDER BY id DESC LIMIT 1",
                 (question,),
             ).fetchone()
             if existing:
-                db.execute("""UPDATE answer_cache SET answer=?,evidence=?,question_embedding=?,
+                db.execute("""UPDATE answer_cache SET answer=?,evidence=?,evidence_state=?,question_embedding=?,
                     embedding_provider=?,created_at=?,last_used_at=?,hits=0 WHERE id=?""",
-                    (answer, json.dumps(evidence or []), json.dumps(embedded.vector),
+                    (answer, json.dumps(evidence), json.dumps(evidence_state), json.dumps(embedded.vector),
                      embedded.provider, _now(), _now(), existing["id"]))
                 return {"cache_id": existing["id"], "provider": embedded.provider, "updated": True}
             cursor = db.execute("""INSERT INTO answer_cache
-              (question,answer,evidence,question_embedding,embedding_provider,created_at,last_used_at,hits)
-              VALUES(?,?,?,?,?,?,?,0)""", (question, answer, json.dumps(evidence or []),
-              json.dumps(embedded.vector), embedded.provider, _now(), _now()))
-        return {"cache_id": cursor.lastrowid, "provider": embedded.provider, "updated": False}
+              (question,answer,evidence,evidence_state,question_embedding,embedding_provider,created_at,last_used_at,hits)
+              VALUES(?,?,?,?,?,?,?,?,0)""", (question, answer, json.dumps(evidence),
+              json.dumps(evidence_state), json.dumps(embedded.vector), embedded.provider, _now(), _now()))
+        return {"cache_id": cursor.lastrowid, "provider": embedded.provider, "updated": False,
+                "tracked_evidence": len(evidence_state)}
 
     def record_decision(self, title: str, decision: str, evidence: list[str] | None = None,
                         status: str = "active") -> dict:
@@ -224,17 +255,31 @@ class LocalMemory:
         embedded = self.embedder.embed(question)
         with self._connect() as db:
             rows = db.execute("SELECT * FROM answer_cache").fetchall()
-            best, best_score = None, 0.0
+            candidates = []
             for row in rows:
                 vector = _cosine(embedded.vector, json.loads(row["question_embedding"] or "[]"))
-                score = vector if vector else _lexical(question, row["question"])
-                if score > best_score:
-                    best, best_score = row, score
-            if best is None or best_score < threshold:
-                return {"hit": False, "score": round(best_score, 4)}
+                lexical = _lexical(question, row["question"])
+                score = (0.8 * vector + 0.2 * lexical) if vector else lexical
+                candidates.append((score, row))
+            candidates.sort(key=lambda item: item[0], reverse=True)
+            best_score = candidates[0][0] if candidates else 0.0
+            stale = 0
+            best = None
+            for score, row in candidates:
+                if score < threshold:
+                    break
+                state = json.loads(row["evidence_state"] or "[]")
+                if not self._evidence_is_current(db, state):
+                    stale += 1
+                    continue
+                best, best_score = row, score
+                break
+            if best is None:
+                return {"hit": False, "score": round(best_score, 4), "stale_candidates": stale}
             db.execute("UPDATE answer_cache SET hits=hits+1,last_used_at=? WHERE id=?", (_now(), best["id"]))
         return {"hit": True, "score": round(best_score, 4), "answer": best["answer"],
-                "evidence": json.loads(best["evidence"]), "cache_id": best["id"]}
+                "evidence": json.loads(best["evidence"]), "cache_id": best["id"],
+                "evidence_current": True}
 
     def status(self) -> dict:
         with self._connect() as db:
