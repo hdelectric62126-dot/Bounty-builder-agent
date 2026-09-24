@@ -426,6 +426,49 @@ class Store:
               ON p.id=q.opportunity_id ORDER BY p.expected_value DESC LIMIT ?""", (limit,))
             return [{**dict(row), "deliberation": json.loads(row["deliberation"])} for row in rows]
 
+    def expire_stale_work(self):
+        """Mark non-current queued bounty work stale without deleting history."""
+        with self.connect() as db:
+            cursor = db.execute("""UPDATE work_queue SET stage='STALE_NOT_CURRENT', updated_at=?
+              WHERE opportunity_id IN (SELECT id FROM opportunities WHERE status!='APPROVED')
+              AND stage IN ('AWAITING_DANIEL_APPROVAL','READY_FOR_ISOLATED_BUILD',
+                            'TRAINING_REQUIRED','BLOCKED_MODEL_NOT_CONFIGURED')""", (now(),))
+            return cursor.rowcount
+
+    def claim_ready_bounty(self):
+        """Claim one fresh internally authorized bounty for isolated building."""
+        with self.connect() as db:
+            row = db.execute("""SELECT q.*, p.external_id, p.title, p.repository,
+              p.reward, p.expected_value, p.url FROM work_queue q
+              JOIN opportunities p ON p.id=q.opportunity_id
+              WHERE q.stage='READY_FOR_ISOLATED_BUILD' AND p.status='APPROVED'
+              ORDER BY p.expected_value DESC, q.id ASC LIMIT 1""").fetchone()
+            if not row:
+                return None
+            cursor = db.execute("""UPDATE work_queue SET stage='BUILDING', updated_at=?
+              WHERE id=? AND stage='READY_FOR_ISOLATED_BUILD'""", (now(), row["id"]))
+            if cursor.rowcount != 1:
+                return None
+            result = dict(row)
+            result["stage"] = "BUILDING"
+            result["deliberation"] = json.loads(result["deliberation"])
+            return result
+
+    def set_bounty_stage(self, queue_id, stage):
+        allowed = {
+            'READY_FOR_ISOLATED_BUILD', 'BUILDING', 'AWAITING_DANIEL_DELIVERY_REVIEW',
+            'TESTS_FAILED', 'BUILD_FAILED', 'BLOCKED_MODEL_NOT_CONFIGURED',
+            'STALE_NOT_CURRENT',
+        }
+        if stage not in allowed:
+            raise ValueError("invalid bounty stage")
+        with self.connect() as db:
+            cursor = db.execute("UPDATE work_queue SET stage=?, updated_at=? WHERE id=?",
+                                (stage, now(), queue_id))
+            if cursor.rowcount != 1:
+                raise KeyError("work queue item not found")
+        return stage
+
     def agent_activity(self):
         with self.connect() as db:
             records = {row["agent"]: row["count"] for row in db.execute(
