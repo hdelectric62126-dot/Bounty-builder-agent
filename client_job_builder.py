@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from hashlib import sha256
 import json
+import re
 
 from task_readiness import LANGUAGE_ALIASES, SKILL_KEYWORDS
 from code_inspector import inspect_code, sanitize_log
@@ -13,6 +14,7 @@ MAX_FILES = 60
 MAX_FILE_CHARS = 80_000
 MAX_TOTAL_CHARS = 300_000
 PROFILES = {"python": "python_diagnostics", "node": "node_diagnostics"}
+_WINDOWS_DRIVE = re.compile(r"^[A-Za-z]:")
 
 
 def safe_files(files):
@@ -23,6 +25,7 @@ def safe_files(files):
     for path, content in files.items():
         parts = path.replace("\\", "/").split("/") if isinstance(path, str) else []
         if (not parts or path.startswith(("/", "~")) or
+                _WINDOWS_DRIVE.match(path) or "\x00" in path or
                 any(not part or part in {".", ".."} or part.startswith(".") for part in parts)):
             raise ValueError("unsafe file path")
         if not isinstance(content, str) or len(content) > MAX_FILE_CHARS:
