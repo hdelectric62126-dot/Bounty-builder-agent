@@ -351,6 +351,14 @@ class Store:
             rows = db.execute("SELECT * FROM audit_log ORDER BY id DESC LIMIT ?", (limit,))
             return [{**dict(row), "details": json.loads(row["details"])} for row in rows]
 
+    def audit_count_since(self, event, since_iso):
+        with self.connect() as db:
+            row = db.execute(
+                "SELECT COUNT(*) count FROM audit_log WHERE event=? AND created_at>=?",
+                (event, since_iso),
+            ).fetchone()
+            return int(row["count"] or 0)
+
     def record_outcome(self, opportunity_id, result, income, cost, hours, notes):
         with self.connect() as db:
             exists = db.execute("SELECT 1 FROM opportunities WHERE id=?", (opportunity_id,)).fetchone()
