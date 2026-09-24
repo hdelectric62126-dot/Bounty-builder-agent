@@ -83,6 +83,13 @@ class BountyContextLoaderTests(unittest.TestCase):
                 "https://github.com/Expensify/App/pull/98624"
             )
 
+
+    def test_default_context_budget_is_cloud_conservative(self):
+        loader = BountyContextLoader()
+        self.assertEqual(12, loader.max_files)
+        self.assertEqual(20_000, loader.max_file_chars)
+        self.assertEqual(70_000, loader.max_total_chars)
+
     def test_path_selection_prioritizes_issue_relevance_and_manifests(self):
         loader = BountyContextLoader(max_files=4)
         tree = [
