@@ -40,8 +40,8 @@ def _keywords(text: str) -> set[str]:
 class BountyContextLoader:
     """Fetch a bounded, issue-relevant slice of a public GitHub repository."""
 
-    def __init__(self, token=None, *, get=requests.get, max_files=28,
-                 max_file_chars=40_000, max_total_chars=260_000):
+    def __init__(self, token=None, *, get=requests.get, max_files=12,
+                 max_file_chars=20_000, max_total_chars=70_000):
         self.get = get
         self.max_files = max(1, min(int(max_files), 40))
         self.max_file_chars = max(1_000, min(int(max_file_chars), 80_000))
