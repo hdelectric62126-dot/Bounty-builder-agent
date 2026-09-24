@@ -30,6 +30,7 @@ from authority_engine import capability_certificates, decide_authority
 from teacher_agent import TeacherAgent
 from revenue_capital_agent import evaluate_capital
 from database_migration import migrate_sqlite_to_postgres
+from bounty_executor import BountyContextLoader, save_build_artifact
 
 DATA_DIR = os.getenv("DATA_DIR", "/data")
 try:
@@ -50,6 +51,9 @@ performance_learner = PerformanceLearner()
 historian = HistoricalExperienceCollector(token=os.getenv("GITHUB_TOKEN"))
 scan_lock = threading.Lock()
 client_job_lock = threading.Lock()
+bounty_build_lock = threading.Lock()
+bounty_context_loader = BountyContextLoader(token=os.getenv("GITHUB_TOKEN"))
+BOUNTY_ARTIFACT_DIR = os.path.join(DATA_DIR, "bounty_builds")
 
 
 def execute_practice(files, profile):
@@ -126,7 +130,8 @@ def run_practice_with_retry(sequence, attempts=3, pause=time.sleep):
 
 @asynccontextmanager
 async def lifespan(_app):
-    for target in (discovery_worker, history_worker, training_worker, client_job_worker):
+    for target in (discovery_worker, history_worker, training_worker,
+                   client_job_worker, bounty_build_worker):
         threading.Thread(target=target, daemon=True, name=target.__name__).start()
     yield
 
@@ -257,6 +262,7 @@ def scan_once():
             stale_rejected = store.reject_unseen_approvals(
                 item["external_id"] for item in items
             )
+        stale_work = store.expire_stale_work()
         for saved in (x for x in store.list_opportunities(200) if x["status"] == "APPROVED"):
             thought = deliberate(saved, store.agent_record_map(saved["external_id"]),
                                  store.experience_stats(), store.skill_profile()).to_dict()
@@ -270,7 +276,7 @@ def scan_once():
         store.audit("scout_completed", {"items": len(items), "fetched": report.fetched,
                     "duplicates": report.duplicates, "rejected": report.rejected,
                     "query_errors": report.query_errors, "stale_rejected": stale_rejected,
-                    "learning": proposal})
+                    "stale_work": stale_work, "learning": proposal})
         return {"status": "complete", "items": len(items)}
     except Exception as exc:
         store.audit("scan_failed", {"error": type(exc).__name__, "message": str(exc)[:300]})
@@ -377,11 +383,84 @@ def client_job_worker():
         time.sleep(2 if outcome["status"] != "idle" else 10)
 
 
+def process_next_bounty_build():
+    if not bounty_build_lock.acquire(blocking=False):
+        return {"status": "busy"}
+    queue_item = None
+    try:
+        store.expire_stale_work()
+        queue_item = store.claim_ready_bounty()
+        if not queue_item:
+            return {"status": "idle"}
+        if not os.getenv("OPENAI_API_KEY", ""):
+            store.set_bounty_stage(queue_item["id"], "BLOCKED_MODEL_NOT_CONFIGURED")
+            store.audit("bounty_build_blocked", {
+                "queue_id": queue_item["id"],
+                "opportunity_id": queue_item["opportunity_id"],
+                "reason": "OPENAI_API_KEY_NOT_CONFIGURED",
+            })
+            return {"status": "BLOCKED_MODEL_NOT_CONFIGURED",
+                    "queue_id": queue_item["id"]}
+
+        opportunity = store.get_opportunity(queue_item["opportunity_id"])
+        if not opportunity or opportunity.get("status") != "APPROVED":
+            store.set_bounty_stage(queue_item["id"], "STALE_NOT_CURRENT")
+            return {"status": "STALE_NOT_CURRENT", "queue_id": queue_item["id"]}
+
+        records = store.agent_record_map(opportunity["external_id"])
+        prepared = bounty_context_loader.prepare(opportunity, records)
+        result = client_job_builder.build(prepared)
+        artifact = save_build_artifact(
+            BOUNTY_ARTIFACT_DIR, queue_item["id"], opportunity, prepared, result
+        )
+        stage = ("AWAITING_DANIEL_DELIVERY_REVIEW"
+                 if result.status == "AWAITING_DELIVERY_REVIEW"
+                 else "TESTS_FAILED")
+        store.set_bounty_stage(queue_item["id"], stage)
+        store.audit("bounty_build_completed", {
+            "queue_id": queue_item["id"],
+            "opportunity_id": queue_item["opportunity_id"],
+            "stage": stage,
+            "artifact": artifact,
+            "changed_files": result.changed_files,
+            "sandbox_status": result.evidence.get("sandbox_status"),
+            "public_submission": False,
+        })
+        return {"status": stage, "queue_id": queue_item["id"]}
+    except Exception as exc:
+        if queue_item:
+            try:
+                store.set_bounty_stage(queue_item["id"], "BUILD_FAILED")
+            except (KeyError, ValueError):
+                pass
+        store.audit("bounty_build_failed", {
+            "queue_id": queue_item["id"] if queue_item else None,
+            "opportunity_id": queue_item["opportunity_id"] if queue_item else None,
+            "error": type(exc).__name__,
+            "message": str(exc)[:300],
+        })
+        return {"status": "BUILD_FAILED", "error": type(exc).__name__}
+    finally:
+        bounty_build_lock.release()
+
+
+def bounty_build_worker():
+    while True:
+        outcome = process_next_bounty_build()
+        time.sleep(2 if outcome["status"] not in {"idle", "BLOCKED_MODEL_NOT_CONFIGURED"} else 30)
+
+
 @app.get("/health")
 def health():
     return {"status": "ok", "mode": "approval_gated_real_world",
             "database": "postgres" if store.postgres else "sqlite",
-            "migration": database_migration, "stats": store.stats()}
+            "migration": database_migration,
+            "bounty_execution": {
+                "worker_enabled": True,
+                "model_configured": bool(os.getenv("OPENAI_API_KEY", "")),
+                "public_submission_automatic": False,
+            },
+            "stats": store.stats()}
 
 
 @app.get("/api/agents")
@@ -474,6 +553,11 @@ def audit_feed(limit: int = 50):
 @app.get("/api/work-queue")
 def queue_data():
     return {"jobs": store.work_queue()}
+
+
+@app.get("/api/opportunities")
+def opportunities_data(limit: int = 100):
+    return {"opportunities": store.list_opportunities(max(1, min(limit, 500)))}
 
 
 @app.get("/api/opportunities/{opportunity_id}")
