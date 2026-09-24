@@ -54,10 +54,12 @@ client_job_lock = threading.Lock()
 bounty_build_lock = threading.Lock()
 bounty_context_loader = BountyContextLoader(token=os.getenv("GITHUB_TOKEN"))
 BOUNTY_ARTIFACT_DIR = os.path.join(DATA_DIR, "bounty_builds")
+OPENAI_KEY_FILE = os.path.join(DATA_DIR, "openai_api_key")
+OPENAI_KEY_SETUP_USED_FILE = os.path.join(DATA_DIR, "openai_key_setup_used")
 BOUNTY_CLOUD_DAILY_JOB_LIMIT = max(1, min(int(os.getenv("BOUNTY_CLOUD_DAILY_JOB_LIMIT", "1")), 5))
 BOUNTY_CLOUD_DAILY_CALL_LIMIT = max(1, min(int(os.getenv("BOUNTY_CLOUD_DAILY_CALL_LIMIT", "2")), 10))
 BOUNTY_CLOUD_MAX_OUTPUT_TOKENS = max(1_000, min(int(os.getenv("BOUNTY_CLOUD_MAX_OUTPUT_TOKENS", "6000")), 20_000))
-BOUNTY_CLOUD_MODEL = os.getenv("BOUNTY_OPENAI_MODEL", "gpt-6-luna")
+BOUNTY_CLOUD_MODEL = os.getenv("BOUNTY_OPENAI_MODEL", "gpt-5.6-luna")
 
 
 def execute_practice(files, profile):
@@ -75,8 +77,32 @@ coding_gym = CodingGym(execute_practice)
 teacher_agent = TeacherAgent()
 
 
+def openai_api_key():
+    env_key = os.getenv("OPENAI_API_KEY", "").strip()
+    if env_key:
+        return env_key
+    try:
+        return open(OPENAI_KEY_FILE, "r", encoding="utf-8").read().strip()
+    except FileNotFoundError:
+        return ""
+
+
+def key_setup_authorized(token):
+    expected = os.getenv("OPENAI_KEY_SETUP_TOKEN_HASH", "").strip()
+    if not expected or not token:
+        return False
+    supplied = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    if not hmac.compare_digest(expected, supplied):
+        return False
+    try:
+        used = open(OPENAI_KEY_SETUP_USED_FILE, "r", encoding="utf-8").read().strip()
+    except FileNotFoundError:
+        used = ""
+    return not hmac.compare_digest(expected, used)
+
+
 def generate_client_solution(packet):
-    api_key = os.getenv("OPENAI_API_KEY", "")
+    api_key = openai_api_key()
     model = os.getenv("OPENAI_MODEL", "gpt-6-astra")
     if not api_key:
         raise RuntimeError("OpenAI coding engine is not configured")
@@ -137,7 +163,7 @@ def bounty_cloud_budget():
 
 
 def generate_bounty_solution(packet):
-    api_key = os.getenv("OPENAI_API_KEY", "")
+    api_key = openai_api_key()
     if not api_key:
         raise RuntimeError("OpenAI coding engine is not configured")
     budget = bounty_cloud_budget()
@@ -474,7 +500,7 @@ def process_next_bounty_build():
         queue_item = store.claim_ready_bounty()
         if not queue_item:
             return {"status": "idle"}
-        if not os.getenv("OPENAI_API_KEY", ""):
+        if not openai_api_key():
             store.set_bounty_stage(queue_item["id"], "BLOCKED_MODEL_NOT_CONFIGURED")
             store.audit("bounty_build_blocked", {
                 "queue_id": queue_item["id"],
@@ -548,11 +574,73 @@ def health():
             "migration": database_migration,
             "bounty_execution": {
                 "worker_enabled": True,
-                "model_configured": bool(os.getenv("OPENAI_API_KEY", "")),
+                "model_configured": bool(openai_api_key()),
                 "cloud_budget": bounty_cloud_budget(),
                 "public_submission_automatic": False,
             },
             "stats": store.stats()}
+
+
+@app.get("/setup/openai", response_class=HTMLResponse)
+def openai_key_setup_page():
+    return HTMLResponse("""<!doctype html>
+<html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Bounty Builder Key Setup</title>
+<style>
+body{font-family:system-ui;max-width:520px;margin:40px auto;padding:0 18px;background:#111;color:#eee}
+input,button{width:100%;box-sizing:border-box;padding:14px;margin:8px 0;font-size:16px}
+button{font-weight:700}.note{color:#bbb;font-size:14px}.ok{color:#8fda8f}
+</style></head>
+<body>
+<h2>Bounty Builder — OpenAI Key</h2>
+<p>Paste the API key from your clipboard below. It goes directly to your Bounty Builder service over HTTPS and is not sent through ChatGPT.</p>
+<form method="post" action="/setup/openai">
+<input type="hidden" id="setup_token" name="setup_token">
+<input type="password" name="api_key" autocomplete="off" placeholder="sk-proj-..." required>
+<button type="submit">Save key securely</button>
+</form>
+<p class="note">This setup link works once. The saved key is stored in the private Railway data volume with owner-only file permissions.</p>
+<script>
+const token=location.hash.slice(1);
+document.getElementById('setup_token').value=token;
+history.replaceState(null,'',location.pathname);
+</script>
+</body></html>""")
+
+
+@app.post("/setup/openai", response_class=HTMLResponse)
+def openai_key_setup_submit(setup_token: str = Form(...), api_key: str = Form(...)):
+    if not key_setup_authorized(setup_token):
+        raise HTTPException(403, "setup link is invalid or already used")
+    key = api_key.strip()
+    if not key.startswith("sk-") or len(key) < 20:
+        raise HTTPException(422, "that does not look like an OpenAI API key")
+    try:
+        response = requests.get(
+            "https://api.openai.com/v1/models",
+            headers={"Authorization": f"Bearer {key}"},
+            timeout=15,
+        )
+    except requests.RequestException as exc:
+        raise HTTPException(503, "could not verify the key with OpenAI") from exc
+    if response.status_code != 200:
+        raise HTTPException(422, "OpenAI rejected that API key")
+    temp = OPENAI_KEY_FILE + ".tmp"
+    with open(temp, "w", encoding="utf-8") as handle:
+        handle.write(key)
+    os.chmod(temp, 0o600)
+    os.replace(temp, OPENAI_KEY_FILE)
+    expected = os.getenv("OPENAI_KEY_SETUP_TOKEN_HASH", "").strip()
+    with open(OPENAI_KEY_SETUP_USED_FILE, "w", encoding="utf-8") as handle:
+        handle.write(expected)
+    os.chmod(OPENAI_KEY_SETUP_USED_FILE, 0o600)
+    store.audit("openai_key_configured", {
+        "source": "one_time_setup_page",
+        "key_material_logged": False,
+    })
+    return HTMLResponse("""<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Key Saved</title><style>body{font-family:system-ui;max-width:520px;margin:40px auto;padding:0 18px;background:#111;color:#eee}.ok{color:#8fda8f}</style></head>
+<body><h2 class="ok">Key saved.</h2><p>Bounty Builder can now use its cloud coding budget. You can close this page.</p></body></html>""")
 
 
 @app.get("/api/agents")
