@@ -555,6 +555,11 @@ def queue_data():
     return {"jobs": store.work_queue()}
 
 
+@app.get("/api/opportunities")
+def opportunities_data(limit: int = 100):
+    return {"opportunities": store.list_opportunities(max(1, min(limit, 500)))}
+
+
 @app.get("/api/opportunities/{opportunity_id}")
 def opportunity_data(opportunity_id: int):
     item = store.get_opportunity(opportunity_id)
