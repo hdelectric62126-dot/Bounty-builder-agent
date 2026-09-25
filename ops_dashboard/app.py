@@ -38,7 +38,7 @@ STATIC_DIR = BASE_DIR / "static"
 DB_PATH = Path(os.getenv("OPS_DB_PATH", "/data/ops_dashboard.db"))
 BACKUP_DIR = Path(os.getenv("OPS_BACKUP_DIR", "/data/backups"))
 HTTP_TIMEOUT = float(os.getenv("OPS_HTTP_TIMEOUT_SECONDS", "4"))
-GITHUB_CACHE_SECONDS = int(os.getenv("OPS_GITHUB_CACHE_SECONDS", "900"))
+GITHUB_CACHE_SECONDS = int(os.getenv("OPS_GITHUB_CACHE_SECONDS", "3600"))
 HEARTBEAT_STALE_SECONDS = int(os.getenv("OPS_HEARTBEAT_STALE_SECONDS", "180"))
 
 ACCESS_TOKEN = os.getenv("OPS_ACCESS_TOKEN", "")
@@ -638,6 +638,14 @@ def fetch_repository_status(config: dict[str, Any]) -> dict[str, Any]:
                 "latest_commit": None,
                 "ci": None,
             }
+        if commit_response.status_code in {403, 429}:
+            return {
+                **config,
+                "status": "rate_limited",
+                "reason": "GitHub source monitor is temporarily rate limited",
+                "latest_commit": None,
+                "ci": None,
+            }
         commit_response.raise_for_status()
         commits = commit_response.json()
         commit = commits[0] if commits else {}
@@ -694,7 +702,9 @@ def repository_statuses() -> list[dict[str, Any]]:
     with _repo_cache_lock:
         if _repo_cache["data"] and now_mono < _repo_cache["expires"]:
             return _repo_cache["data"]
-    with ThreadPoolExecutor(max_workers=min(5, len(REPOSITORIES))) as pool:
+    # GitHub applies secondary throttles more aggressively to bursts from shared
+    # cloud egress IPs. Keep source checks intentionally low-concurrency.
+    with ThreadPoolExecutor(max_workers=min(2, len(REPOSITORIES))) as pool:
         futures = [pool.submit(fetch_repository_status, config) for config in REPOSITORIES]
         results = [future.result() for future in as_completed(futures)]
     order = {config["id"]: index for index, config in enumerate(REPOSITORIES)}

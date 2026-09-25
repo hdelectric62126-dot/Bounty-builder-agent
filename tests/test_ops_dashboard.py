@@ -20,6 +20,7 @@ from ops_dashboard.app import (
     session_cookie_value,
     request_with_retry,
     action_center,
+    fetch_repository_status,
 )
 
 
@@ -114,6 +115,21 @@ class CentralOperationsTests(unittest.TestCase):
         self.assertTrue(any("not reporting PAPER mode" in message for message in messages))
         self.assertTrue(any("Cloud model is not configured" in message for message in messages))
         self.assertTrue(any(item["severity"] == "critical" for item in actions))
+
+    def test_github_rate_limit_is_not_reported_as_repository_failure(self):
+        response = Mock()
+        response.status_code = 403
+        response.raise_for_status.side_effect = None
+        with patch("ops_dashboard.app.requests.get", return_value=response):
+            result = fetch_repository_status({
+                "id": "repo-test",
+                "name": "Test repo",
+                "repo": "example/example",
+                "branch": "main",
+                "private": False,
+            })
+        self.assertEqual(result["status"], "rate_limited")
+        self.assertIn("rate limited", result["reason"].lower())
 
     def test_daily_backup_is_created(self):
         self.store.event("central-ops", "info", "test", "hello")
