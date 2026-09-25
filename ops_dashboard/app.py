@@ -738,6 +738,7 @@ def action_center(
     repos: list[dict[str, Any]],
     backup: dict[str, Any],
     alpaca_detail: dict[str, Any],
+    bounty_summary: dict[str, Any],
 ) -> list[dict[str, str]]:
     actions: list[dict[str, str]] = []
     for item in cloud:
@@ -779,6 +780,46 @@ def action_center(
             "system": "Alpaca Trading Agent",
             "message": alpaca_detail.get("reason", "Read-only metrics unavailable"),
         })
+    elif str(alpaca_detail.get("mode") or "").upper() not in {"", "PAPER"}:
+        actions.append({
+            "severity": "critical",
+            "system": "Alpaca Trading Agent",
+            "message": "Trading dashboard is not reporting PAPER mode",
+        })
+    else:
+        unhealthy_guardian = [
+            row for row in (alpaca_detail.get("guardian") or [])
+            if int(row.get("failures") or 0) > 0
+        ]
+        if unhealthy_guardian:
+            actions.append({
+                "severity": "warning",
+                "system": "Alpaca Trading Agent",
+                "message": f"Guardian reports failures in {len(unhealthy_guardian)} subsystem(s)",
+            })
+
+    if bounty_summary.get("worker_enabled") is False:
+        actions.append({
+            "severity": "critical",
+            "system": "Bounty Builder",
+            "message": "Bounty execution worker is disabled",
+        })
+    if bounty_summary.get("model_configured") is False:
+        actions.append({
+            "severity": "warning",
+            "system": "Bounty Builder",
+            "message": "Cloud model is not configured; automatic bounty generation is blocked",
+        })
+    budget = bounty_summary.get("cloud_budget")
+    if isinstance(budget, dict):
+        remaining_jobs = budget.get("remaining_jobs")
+        remaining_calls = budget.get("remaining_calls")
+        if remaining_jobs == 0 or remaining_calls == 0:
+            actions.append({
+                "severity": "warning",
+                "system": "Bounty Builder",
+                "message": "Today's cloud-model budget is exhausted",
+            })
     return actions[:12]
 
 
@@ -881,8 +922,15 @@ def overview(
         (item for item in cloud if item["id"] == "bounty-builder"),
         {},
     )
+    bounty_summary = summarize_bounty(bounty_monitor)
     overall = compute_overall(cloud, local, repos)
-    actions = action_center(cloud, local, repos, backup, alpaca_detail)
+    actions = action_center(
+        cloud, local, repos, backup, alpaca_detail, bounty_summary
+    )
+    if any(item["severity"] == "critical" for item in actions):
+        overall = "critical"
+    elif overall == "healthy" and actions:
+        overall = "attention"
 
     healthy_cloud = sum(item["status"] == "healthy" for item in cloud)
     healthy_local = sum(item["status"] == "healthy" for item in local)
@@ -905,7 +953,7 @@ def overview(
         "local": local,
         "repositories": repos,
         "alpaca": alpaca_detail,
-        "bounty": summarize_bounty(bounty_monitor),
+        "bounty": bounty_summary,
         "backup": backup,
         "actions": actions,
         "events": store.recent_events(),

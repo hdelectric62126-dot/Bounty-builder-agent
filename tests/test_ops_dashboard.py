@@ -19,6 +19,7 @@ from ops_dashboard.app import (
     is_authenticated,
     session_cookie_value,
     request_with_retry,
+    action_center,
 )
 
 
@@ -99,6 +100,20 @@ class CentralOperationsTests(unittest.TestCase):
         local = [{"status": "healthy"}]
         repos = [{"status": "healthy"}]
         self.assertEqual(compute_overall(cloud, local, repos), "critical")
+
+    def test_action_center_flags_blocked_bounty_model_and_nonpaper_trading(self):
+        actions = action_center(
+            cloud=[],
+            local=[],
+            repos=[],
+            backup={"status": "healthy"},
+            alpaca_detail={"status": "healthy", "mode": "LIVE", "guardian": []},
+            bounty_summary={"worker_enabled": True, "model_configured": False},
+        )
+        messages = [item["message"] for item in actions]
+        self.assertTrue(any("not reporting PAPER mode" in message for message in messages))
+        self.assertTrue(any("Cloud model is not configured" in message for message in messages))
+        self.assertTrue(any(item["severity"] == "critical" for item in actions))
 
     def test_daily_backup_is_created(self):
         self.store.event("central-ops", "info", "test", "hello")
