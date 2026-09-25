@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from fastapi import HTTPException
 
@@ -35,6 +36,12 @@ class ObservabilityTests(unittest.TestCase):
         self.assertIn("bounty-builder-data", page)
         self.assertIn(app.DATA_DIR, page)
         self.assertIn("1 GB", page)
+
+    def test_health_does_not_wait_for_database_stats(self):
+        with patch.object(app.store, "stats", side_effect=AssertionError("database accessed")):
+            response = app.health()
+        self.assertEqual("ok", response["status"])
+        self.assertNotIn("stats", response)
 
     def test_outcome_requires_admin_and_updates_realized_income(self):
         previous = os.environ.get("ADMIN_TOKEN")
