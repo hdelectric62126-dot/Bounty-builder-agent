@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 _temp = tempfile.TemporaryDirectory()
 os.environ["OPS_DB_PATH"] = str(Path(_temp.name) / "ops.db")
@@ -17,6 +18,7 @@ from ops_dashboard.app import (
     compute_overall,
     is_authenticated,
     session_cookie_value,
+    request_with_retry,
 )
 
 
@@ -76,6 +78,18 @@ class CentralOperationsTests(unittest.TestCase):
             [{"id": "localmind", "name": "LocalMind", "critical": False}]
         )[0]
         self.assertEqual(result["status"], "stale")
+
+    def test_network_health_request_retries_one_transient_timeout(self):
+        response = Mock()
+        response.status_code = 200
+        with patch(
+            "ops_dashboard.app.requests.get",
+            side_effect=[__import__("requests").Timeout("slow"), response],
+        ) as mocked:
+            result, attempts = request_with_retry("https://example.invalid/health", attempts=2)
+        self.assertIs(result, response)
+        self.assertEqual(attempts, 2)
+        self.assertEqual(mocked.call_count, 2)
 
     def test_overall_status_prioritizes_critical_runtime_failure(self):
         cloud = [
