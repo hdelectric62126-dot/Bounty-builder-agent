@@ -481,6 +481,34 @@ def safe_json(response: requests.Response) -> Any:
         return None
 
 
+def request_with_retry(
+    url: str,
+    *,
+    headers: dict[str, str] | None = None,
+    attempts: int = 2,
+) -> tuple[requests.Response, int]:
+    """GET a fixed operations endpoint with one bounded transient retry."""
+    last_error: requests.RequestException | None = None
+    for attempt in range(1, max(1, attempts) + 1):
+        try:
+            response = requests.get(
+                url,
+                timeout=HTTP_TIMEOUT,
+                headers=headers or {"User-Agent": f"CentralOperations/{APP_VERSION}"},
+            )
+            return response, attempt
+        except (requests.Timeout, requests.ConnectionError) as exc:
+            last_error = exc
+            if attempt < attempts:
+                time.sleep(0.15 * attempt)
+                continue
+            raise
+        except requests.RequestException:
+            raise
+    assert last_error is not None
+    raise last_error
+
+
 def classify_health_payload(payload: Any) -> tuple[str, str]:
     if not isinstance(payload, dict):
         return "degraded", "Endpoint returned non-JSON health data"
@@ -497,10 +525,9 @@ def classify_health_payload(payload: Any) -> tuple[str, str]:
 def fetch_http_monitor(config: dict[str, Any]) -> dict[str, Any]:
     started = time.monotonic()
     try:
-        response = requests.get(
+        response, attempts = request_with_retry(
             config["health_url"],
-            timeout=HTTP_TIMEOUT,
-            headers={"User-Agent": f"CentralOperations/{APP_VERSION}"},
+            attempts=2 if config.get("critical") else 1,
         )
         latency = round((time.monotonic() - started) * 1000.0, 1)
         payload = safe_json(response)
@@ -517,6 +544,7 @@ def fetch_http_monitor(config: dict[str, Any]) -> dict[str, Any]:
             "checked_at": iso_now(),
             "latency_ms": latency,
             "http_status": response.status_code,
+            "attempts": attempts,
             "details": payload if isinstance(payload, dict) else {},
         }
     except requests.RequestException as exc:
@@ -527,6 +555,7 @@ def fetch_http_monitor(config: dict[str, Any]) -> dict[str, Any]:
             "checked_at": iso_now(),
             "latency_ms": round((time.monotonic() - started) * 1000.0, 1),
             "http_status": None,
+            "attempts": 2 if config.get("critical") else 1,
             "details": {},
         }
     store.record_state(config["id"], result["status"], result["reason"])
@@ -545,9 +574,9 @@ def fetch_alpaca_detail() -> dict[str, Any]:
     )
     started = time.monotonic()
     try:
-        response = requests.get(
+        response, attempts = request_with_retry(
             base,
-            timeout=HTTP_TIMEOUT,
+            attempts=2,
             headers={
                 "Authorization": "Bearer " + ALPACA_READ_TOKEN,
                 "User-Agent": f"CentralOperations/{APP_VERSION}",
@@ -566,6 +595,7 @@ def fetch_alpaca_detail() -> dict[str, Any]:
             "status": "healthy",
             "reason": "Authenticated read-only metrics connected",
             "latency_ms": round((time.monotonic() - started) * 1000.0, 1),
+            "attempts": attempts,
             "mode": payload.get("mode"),
             "runtime": payload.get("runtime"),
             "research": payload.get("research"),
