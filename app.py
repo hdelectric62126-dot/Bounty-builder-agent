@@ -569,6 +569,9 @@ def bounty_build_worker():
 
 @app.get("/health")
 def health():
+    # Keep liveness independent of the database. Worker activity can hold the
+    # SQLite volume lock for several seconds, which made external watchdogs
+    # time out even though the process was healthy.
     return {"status": "ok", "mode": "approval_gated_real_world",
             "database": "postgres" if store.postgres else "sqlite",
             "migration": database_migration,
@@ -577,8 +580,7 @@ def health():
                 "model_configured": bool(openai_api_key()),
                 "cloud_budget": bounty_cloud_budget(),
                 "public_submission_automatic": False,
-            },
-            "stats": store.stats()}
+            }}
 
 
 @app.get("/setup/openai", response_class=HTMLResponse)
