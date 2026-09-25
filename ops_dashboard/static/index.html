@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>Central Operations</title>
+<style>
+:root{
+  --bg:#070b12;--panel:#0d1420;--panel2:#101a29;--line:#1f2b3d;--text:#e8eef8;
+  --muted:#8ea0b8;--good:#37d892;--warn:#f7c45b;--bad:#ff6b75;--blue:#6aa7ff;
+  --shadow:0 16px 40px rgba(0,0,0,.28);--radius:18px
+}
+*{box-sizing:border-box}html{background:var(--bg)}body{margin:0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:
+radial-gradient(900px 500px at 15% -5%,rgba(56,112,255,.16),transparent 60%),
+radial-gradient(800px 450px at 100% 0%,rgba(55,216,146,.08),transparent 60%),var(--bg);color:var(--text)}
+button,input{font:inherit}button{cursor:pointer}.hidden{display:none!important}
+.shell{min-height:100vh}.topbar{position:sticky;top:0;z-index:20;backdrop-filter:blur(14px);background:rgba(7,11,18,.82);border-bottom:1px solid rgba(255,255,255,.06)}
+.topbar-inner{max-width:1500px;margin:auto;padding:14px 20px;display:flex;align-items:center;gap:14px}.brand{display:flex;align-items:center;gap:12px;min-width:260px}
+.logo{width:36px;height:36px;border-radius:11px;background:linear-gradient(145deg,#4d8dff,#4be2a3);display:grid;place-items:center;color:#06101b;font-weight:900;box-shadow:0 0 30px rgba(77,141,255,.25)}
+.brand h1{font-size:16px;margin:0;letter-spacing:.02em}.brand small{display:block;color:var(--muted);font-size:11px;margin-top:2px}
+.nav{display:flex;gap:6px;flex:1}.nav button{border:0;background:transparent;color:var(--muted);padding:9px 12px;border-radius:10px}.nav button.active{background:#132033;color:#fff}
+.top-actions{display:flex;gap:8px;align-items:center}.btn{border:1px solid var(--line);background:#111b2a;color:var(--text);padding:9px 12px;border-radius:10px}.btn:hover{border-color:#38506f}.btn.primary{background:#17366a;border-color:#285493}
+.dot{width:9px;height:9px;border-radius:50%;display:inline-block}.dot.good{background:var(--good);box-shadow:0 0 14px rgba(55,216,146,.65)}.dot.warn{background:var(--warn)}.dot.bad{background:var(--bad)}
+.container{max-width:1500px;margin:auto;padding:24px 20px 50px}.hero{display:flex;gap:18px;justify-content:space-between;align-items:flex-end;margin-bottom:20px}
+.hero h2{font-size:30px;letter-spacing:-.03em;margin:0 0 7px}.hero p{margin:0;color:var(--muted)}.timestamp{font-size:12px;color:var(--muted);text-align:right}
+.summary-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin-bottom:18px}.kpi{background:linear-gradient(180deg,rgba(18,28,43,.95),rgba(11,17,27,.95));border:1px solid var(--line);border-radius:var(--radius);padding:17px;box-shadow:var(--shadow)}
+.kpi label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}.kpi .value{font-size:27px;font-weight:800;margin-top:5px}.kpi .sub{font-size:11px;color:var(--muted);margin-top:3px}
+.grid{display:grid;grid-template-columns:1.55fr 1fr;gap:14px}.stack{display:grid;gap:14px}.card{background:rgba(13,20,32,.93);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}
+.card-head{display:flex;justify-content:space-between;align-items:center;padding:16px 18px;border-bottom:1px solid rgba(255,255,255,.055)}.card-head h3{font-size:14px;margin:0}.card-head span{font-size:11px;color:var(--muted)}
+.card-body{padding:16px 18px}.system-row{display:grid;grid-template-columns:minmax(180px,1.2fr) 100px 1.5fr 90px;gap:12px;align-items:center;padding:13px 0;border-bottom:1px solid rgba(255,255,255,.05)}.system-row:last-child{border-bottom:0}
+.system-name{font-weight:700}.system-name small{display:block;color:var(--muted);font-weight:400;margin-top:3px}.status{display:inline-flex;align-items:center;gap:7px;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em}.status::before{content:"";width:8px;height:8px;border-radius:50%}.status.healthy::before{background:var(--good)}.status.degraded::before,.status.attention::before,.status.waiting::before,.status.stale::before,.status.auth_needed::before{background:var(--warn)}.status.down::before,.status.critical::before{background:var(--bad)}
+.reason{color:#b9c7da;font-size:12px;line-height:1.4}.latency{font-size:12px;color:var(--muted);text-align:right}
+.action{border:1px solid var(--line);border-left-width:3px;border-radius:12px;padding:12px;margin-bottom:9px;background:#0a111c}.action.warning{border-left-color:var(--warn)}.action.critical{border-left-color:var(--bad)}.action.info{border-left-color:var(--blue)}
+.action strong{display:block;font-size:12px}.action p{font-size:12px;color:var(--muted);margin:4px 0 0;line-height:1.4}
+.metric-pair{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.metric{padding:13px;border:1px solid var(--line);background:#0a111b;border-radius:13px}.metric b{font-size:20px;display:block}.metric span{font-size:11px;color:var(--muted)}
+.mini-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:9px}.mini{background:#0a111b;border:1px solid var(--line);border-radius:12px;padding:12px}.mini b{font-size:16px;display:block}.mini span{font-size:10px;color:var(--muted)}
+.repo-row,.event-row{padding:12px 0;border-bottom:1px solid rgba(255,255,255,.05)}.repo-row:last-child,.event-row:last-child{border-bottom:0}.repo-top{display:flex;justify-content:space-between;gap:10px}.repo-title{font-size:12px;font-weight:700}.repo-meta{font-size:11px;color:var(--muted);margin-top:4px;line-height:1.45}.repo-meta a{color:var(--blue);text-decoration:none}
+.event-row{display:grid;grid-template-columns:150px 120px 1fr;gap:12px;font-size:11px}.event-time,.event-system{color:var(--muted)}.event-msg{color:#c8d4e4}
+.tab-pane{display:none}.tab-pane.active{display:block}.wide-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.system-card{padding:16px}.system-card h3{margin:0 0 4px;font-size:15px}.system-card .category{color:var(--muted);font-size:11px}.caps{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}.chip{font-size:10px;padding:5px 8px;border:1px solid var(--line);border-radius:999px;color:#aebfd4;background:#0a111b}
+.connector{display:grid;grid-template-columns:1fr 1fr;gap:14px}.code{background:#05080d;border:1px solid var(--line);border-radius:12px;padding:14px;white-space:pre-wrap;word-break:break-word;color:#b9d5ff;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:11px;line-height:1.55;max-height:260px;overflow:auto}
+.note{font-size:12px;color:var(--muted);line-height:1.55}.footer{color:#61718a;font-size:10px;text-align:center;margin-top:24px}
+.login-wrap{position:fixed;inset:0;z-index:100;background:radial-gradient(700px 500px at 50% 20%,rgba(60,120,255,.18),transparent 60%),#070b12;display:grid;place-items:center;padding:20px}.login{width:min(440px,100%);background:#0d1420;border:1px solid #223149;border-radius:22px;padding:26px;box-shadow:0 30px 80px rgba(0,0,0,.45)}.login h2{margin:0 0 7px;font-size:25px}.login p{color:var(--muted);font-size:13px;line-height:1.5}.login input{width:100%;background:#070c14;border:1px solid #2a3a52;color:white;padding:13px 14px;border-radius:12px;outline:none;margin:9px 0}.login input:focus{border-color:#4f8fff}.login button{width:100%;padding:13px;border-radius:12px;border:0;background:linear-gradient(135deg,#2764c6,#288a6c);color:white;font-weight:800;margin-top:5px}.login-error{height:20px;color:var(--bad);font-size:11px;margin-top:9px}
+.skeleton{opacity:.48;animation:pulse 1.2s ease-in-out infinite}@keyframes pulse{50%{opacity:.2}}
+@media(max-width:1050px){.summary-grid{grid-template-columns:repeat(3,1fr)}.grid,.connector{grid-template-columns:1fr}.wide-grid{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:700px){.topbar-inner{flex-wrap:wrap}.brand{min-width:0;flex:1}.nav{order:3;width:100%;overflow:auto}.nav button{white-space:nowrap}.container{padding:18px 12px 35px}.hero{align-items:flex-start;flex-direction:column}.timestamp{text-align:left}.summary-grid{grid-template-columns:repeat(2,1fr)}.wide-grid{grid-template-columns:1fr}.system-row{grid-template-columns:1fr auto}.reason{grid-column:1/3}.latency{grid-column:2}.mini-grid{grid-template-columns:repeat(2,1fr)}.event-row{grid-template-columns:1fr}.event-time,.event-system{display:inline}.top-actions .btn.logout-label{font-size:0}.top-actions .btn.logout-label:after{content:"Exit";font-size:12px}}
+</style>
+</head>
+<body>
+<div id="loginWrap" class="login-wrap">
+  <div class="login">
+    <div class="logo" style="margin-bottom:18px">CO</div>
+    <h2>Central Operations</h2>
+    <p>Private read-only command center for your agents, cloud services, source health, learning systems, and local runtime heartbeats.</p>
+    <input id="loginToken" type="password" autocomplete="current-password" placeholder="Access code">
+    <button id="loginBtn">Unlock Operations</button>
+    <div id="loginError" class="login-error"></div>
+  </div>
+</div>
+
+<div id="app" class="shell hidden">
+  <div class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <div class="logo">CO</div>
+        <div><h1>Central Operations</h1><small id="versionText">Operations command center</small></div>
+      </div>
+      <div class="nav">
+        <button class="active" data-tab="overview">Overview</button>
+        <button data-tab="systems">Systems</button>
+        <button data-tab="activity">Activity</button>
+        <button data-tab="connectors">Connectors</button>
+      </div>
+      <div class="top-actions">
+        <span id="topHealth"><span class="dot warn"></span></span>
+        <button class="btn" id="refreshBtn">Refresh</button>
+        <button class="btn logout-label" id="logoutBtn">Log out</button>
+      </div>
+    </div>
+  </div>
+
+  <main class="container">
+    <section id="overview" class="tab-pane active">
+      <div class="hero">
+        <div><h2 id="heroTitle">Operations status</h2><p id="heroSub">Loading live system state…</p></div>
+        <div class="timestamp"><div>Last refresh</div><strong id="generatedAt">—</strong></div>
+      </div>
+
+      <div class="summary-grid">
+        <div class="kpi"><label>Overall</label><div class="value" id="overallKpi">—</div><div class="sub">System posture</div></div>
+        <div class="kpi"><label>Cloud</label><div class="value" id="cloudKpi">—</div><div class="sub">Connected runtimes</div></div>
+        <div class="kpi"><label>Local</label><div class="value" id="localKpi">—</div><div class="sub">Heartbeats</div></div>
+        <div class="kpi"><label>Source</label><div class="value" id="repoKpi">—</div><div class="sub">Healthy repositories</div></div>
+        <div class="kpi"><label>Attention</label><div class="value" id="actionKpi">—</div><div class="sub">Open action items</div></div>
+      </div>
+
+      <div class="grid">
+        <div class="stack">
+          <div class="card">
+            <div class="card-head"><h3>Live systems</h3><span>Runtime health + latency</span></div>
+            <div class="card-body" id="cloudSystems"></div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h3>Source & CI</h3><span>GitHub commit / workflow state</span></div>
+            <div class="card-body" id="repoOverview"></div>
+          </div>
+        </div>
+
+        <div class="stack">
+          <div class="card">
+            <div class="card-head"><h3>Action center</h3><span>What needs attention</span></div>
+            <div class="card-body" id="actions"></div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h3>Alpaca paper system</h3><span>Read-only operating metrics</span></div>
+            <div class="card-body">
+              <div class="mini-grid" id="alpacaMetrics"></div>
+              <div class="note" id="alpacaNote" style="margin-top:12px"></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h3>Bounty Builder</h3><span>Discovery + revenue loop</span></div>
+            <div class="card-body">
+              <div class="mini-grid" id="bountyMetrics"></div>
+              <div class="note" id="bountyNote" style="margin-top:12px"></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h3>Protection</h3><span>Central dashboard persistence</span></div>
+            <div class="card-body" id="backupStatus"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="systems" class="tab-pane">
+      <div class="hero"><div><h2>Systems</h2><p>Cloud services, local agents, storage posture, and capabilities.</p></div></div>
+      <div class="wide-grid" id="systemCards"></div>
+    </section>
+
+    <section id="activity" class="tab-pane">
+      <div class="hero"><div><h2>Activity</h2><p>Status transitions, heartbeat changes, and dashboard incidents.</p></div></div>
+      <div class="card"><div class="card-head"><h3>Operations timeline</h3><span>Newest first</span></div><div class="card-body" id="events"></div></div>
+    </section>
+
+    <section id="connectors" class="tab-pane">
+      <div class="hero"><div><h2>Connectors</h2><p>Bring local applications into Central Operations without exposing control of them.</p></div></div>
+      <div class="connector">
+        <div class="card">
+          <div class="card-head"><h3>Native Mind / LocalMind heartbeat</h3><span>Windows setup</span></div>
+          <div class="card-body">
+            <p class="note">This stores only a signed runtime heartbeat. It does not grant the dashboard command execution on your PC.</p>
+            <div id="connectorCode" class="code">Loading connector…</div>
+            <button id="copyConnector" class="btn primary" style="margin-top:12px">Copy PowerShell setup</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>Generic local heartbeat</h3><span>1099 / licensing / future tools</span></div>
+          <div class="card-body">
+            <p class="note">Any approved local service can POST a signed heartbeat. Known IDs are <b>localmind</b>, <b>1099-agent</b>, and <b>license-tools</b>. Unknown IDs are rejected.</p>
+            <div id="heartbeatInfo" class="code">Loading…</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="footer">Central Operations is read-only toward downstream production systems. Mutating actions remain inside each system's own approval and safety controls.</div>
+  </main>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+let overviewData=null;
+let connectorData=null;
+let refreshTimer=null;
+
+function esc(v){return String(v??'').replace(/[&<>"']/g,s=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s]))}
+function fmtTime(v){if(!v)return'—';try{return new Date(v).toLocaleString()}catch{return v}}
+function fmtNum(v,d=0){if(v===null||v===undefined||Number.isNaN(Number(v)))return'—';return Number(v).toLocaleString(undefined,{maximumFractionDigits:d})}
+function fmtMoney(v){if(v===null||v===undefined||Number.isNaN(Number(v)))return'—';return '$'+Number(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}
+function statusClass(s){return ['healthy','degraded','down','critical','attention','waiting','stale','auth_needed'].includes(s)?s:'attention'}
+function statusText(s){return String(s||'unknown').replaceAll('_',' ')}
+function sysRow(item){
+  return `<div class="system-row">
+    <div class="system-name">${esc(item.name)}<small>${esc(item.category||'')}</small></div>
+    <div class="status ${statusClass(item.status)}">${esc(statusText(item.status))}</div>
+    <div class="reason">${esc(item.reason||'')}</div>
+    <div class="latency">${item.latency_ms!=null?esc(item.latency_ms)+' ms':(item.age_seconds!=null?esc(item.age_seconds)+'s ago':'—')}</div>
+  </div>`
+}
+function mini(label,value,sub=''){
+  return `<div class="mini"><b>${esc(value)}</b><span>${esc(label)}${sub?' · '+esc(sub):''}</span></div>`
+}
+
+async function api(path,opts={}){
+  const r=await fetch(path,{credentials:'same-origin',...opts,headers:{'Content-Type':'application/json',...(opts.headers||{})}});
+  if(r.status===401)throw new Error('AUTH');
+  if(!r.ok)throw new Error('HTTP '+r.status);
+  return r.json();
+}
+
+async function login(){
+  $('loginError').textContent='';
+  const token=$('loginToken').value.trim();
+  if(!token){$('loginError').textContent='Enter the access code.';return}
+  try{
+    await api('/api/login',{method:'POST',body:JSON.stringify({token})});
+    $('loginWrap').classList.add('hidden');$('app').classList.remove('hidden');$('loginToken').value='';
+    await refreshAll();startRefresh();
+  }catch(e){$('loginError').textContent=e.message==='AUTH'?'Invalid access code.':'Unable to sign in.'}
+}
+async function logout(){
+  try{await fetch('/api/logout',{method:'POST',credentials:'same-origin'})}catch{}
+  clearInterval(refreshTimer);location.reload();
+}
+function startRefresh(){clearInterval(refreshTimer);refreshTimer=setInterval(()=>refreshAll(true),30000)}
+
+async function refreshAll(silent=false){
+  if(!silent)$('refreshBtn').textContent='Refreshing…';
+  try{
+    const data=await api('/api/overview');overviewData=data;render(data);
+    if(document.querySelector('[data-tab="connectors"].active'))loadConnectors();
+  }catch(e){
+    if(e.message==='AUTH'){clearInterval(refreshTimer);$('app').classList.add('hidden');$('loginWrap').classList.remove('hidden')}
+    else{$('heroSub').textContent='Dashboard refresh failed. Existing view left in place.'}
+  }finally{$('refreshBtn').textContent='Refresh'}
+}
+
+function render(d){
+  $('versionText').textContent=`v${d.service.version} · read-only operations`;
+  $('generatedAt').textContent=fmtTime(d.generated_at);
+  $('overallKpi').textContent=statusText(d.overall).toUpperCase();
+  $('cloudKpi').textContent=`${d.summary.cloud_healthy}/${d.summary.cloud_total}`;
+  $('localKpi').textContent=`${d.summary.local_healthy}/${d.summary.local_total}`;
+  $('repoKpi').textContent=`${d.summary.repos_healthy}/${d.summary.repos_total}`;
+  $('actionKpi').textContent=d.summary.open_actions;
+  const posture=d.overall==='healthy'?'All monitored systems are healthy.':d.overall==='critical'?'A critical cloud runtime needs attention.':'Core services are running; review the attention items below.';
+  $('heroTitle').textContent='Operations '+statusText(d.overall);
+  $('heroSub').textContent=posture;
+  $('topHealth').innerHTML=`<span class="dot ${d.overall==='healthy'?'good':d.overall==='critical'?'bad':'warn'}"></span>`;
+
+  $('cloudSystems').innerHTML=d.cloud.map(sysRow).join('')+d.local.map(sysRow).join('');
+
+  $('actions').innerHTML=d.actions.length?d.actions.map(a=>`<div class="action ${esc(a.severity)}"><strong>${esc(a.system)}</strong><p>${esc(a.message)}</p></div>`).join(''):`<div class="action info"><strong>No active action items</strong><p>Monitored systems are inside their configured health thresholds.</p></div>`;
+
+  const am=d.alpaca?.metrics||{};
+  $('alpacaMetrics').innerHTML=
+    mini('7d paper P/L',fmtMoney(am.realized_pnl))+
+    mini('Closed trades',fmtNum(am.closed_trades))+
+    mini('Win rate',am.win_rate==null?'—':fmtNum(am.win_rate,1)+'%')+
+    mini('Pending orders',fmtNum(am.pending_orders));
+  $('alpacaNote').textContent=d.alpaca?.status==='healthy'
+    ?`Read-only feed connected. Mode: ${d.alpaca.mode||'paper'}. Last strategy cycle: ${fmtTime(d.alpaca.last_cycle)}.`
+    :`Detailed Alpaca metrics: ${d.alpaca?.reason||'unavailable'}.`;
+
+  const b=d.bounty||{};
+  $('bountyMetrics').innerHTML=
+    mini('Found',fmtNum(b.found))+
+    mini('Approved',fmtNum(b.approved))+
+    mini('Expected value',fmtMoney(b.expected_value))+
+    mini('Realized income',fmtMoney(b.realized_income));
+  $('bountyNote').textContent=`Worker: ${b.worker_enabled===true?'enabled':b.worker_enabled===false?'disabled':'unknown'} · Model: ${b.model_configured===true?'configured':b.model_configured===false?'not configured':'unknown'} · Database: ${b.database||'unknown'}.`;
+
+  const bk=d.backup||{};
+  $('backupStatus').innerHTML=`<div class="system-row" style="grid-template-columns:1fr auto">
+    <div class="system-name">Ops status database<small>${bk.path?esc(bk.path):'Persistent status/event history'}</small></div>
+    <div class="status ${statusClass(bk.status==='healthy'?'healthy':'degraded')}">${esc(statusText(bk.status))}</div>
+    <div class="reason" style="grid-column:1/3">Daily snapshot: ${esc(fmtTime(bk.last_backup))}</div>
+  </div>`;
+
+  $('repoOverview').innerHTML=d.repositories.map(r=>`<div class="repo-row"><div class="repo-top"><div class="repo-title">${esc(r.name)}</div><div class="status ${statusClass(r.status)}">${esc(statusText(r.status))}</div></div><div class="repo-meta">${r.latest_commit?`<a href="${esc(r.latest_commit.url)}" target="_blank" rel="noreferrer">${esc(r.latest_commit.sha)}</a> · ${esc(r.latest_commit.message)} · ${esc(fmtTime(r.latest_commit.date))}`:`${esc(r.reason)}`}${r.ci?`<br>CI: ${esc(r.ci.name||'workflow')} · ${esc(r.ci.conclusion||r.ci.status||'running')}`:''}</div></div>`).join('');
+
+  const allSystems=[...d.cloud,...d.local];
+  $('systemCards').innerHTML=allSystems.map(s=>`<div class="card system-card"><div class="repo-top"><div><h3>${esc(s.name)}</h3><div class="category">${esc(s.category||'')}</div></div><div class="status ${statusClass(s.status)}">${esc(statusText(s.status))}</div></div><p class="note">${esc(s.reason||'')}</p>${s.storage?`<p class="note"><b>Storage:</b> ${esc(s.storage)}</p>`:''}${s.version?`<p class="note"><b>Version:</b> ${esc(s.version)}</p>`:''}<div class="caps">${(s.capabilities||[]).map(c=>`<span class="chip">${esc(c)}</span>`).join('')}</div>${s.link?`<button class="btn" style="margin-top:14px" onclick="window.open('${esc(s.link)}','_blank','noopener')">Open service</button>`:''}</div>`).join('');
+
+  $('events').innerHTML=d.events.length?d.events.map(e=>`<div class="event-row"><div class="event-time">${esc(fmtTime(e.timestamp))}</div><div class="event-system">${esc(e.system_id)}</div><div class="event-msg">${esc(e.message)}</div></div>`).join(''):`<div class="note">No status changes recorded yet.</div>`;
+}
+
+async function loadConnectors(){
+  if(connectorData){renderConnectors(connectorData);return}
+  try{connectorData=await api('/api/connectors');renderConnectors(connectorData)}
+  catch(e){$('connectorCode').textContent='Connector details unavailable.'}
+}
+function renderConnectors(c){
+  $('connectorCode').textContent=c.localmind?.powershell_setup||'Connector is not configured.';
+  const g=c.generic_heartbeat||{};
+  $('heartbeatInfo').textContent=`POST /api/heartbeat/{system_id}\nHeader: ${g.header||'X-Ops-Heartbeat'}: [signed token]\n\nBody example:\n${JSON.stringify(g.body_example||{},null,2)}`;
+}
+
+document.querySelectorAll('.nav button').forEach(btn=>btn.addEventListener('click',()=>{
+  document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));
+  document.querySelectorAll('.tab-pane').forEach(p=>p.classList.remove('active'));
+  btn.classList.add('active');$(btn.dataset.tab).classList.add('active');
+  if(btn.dataset.tab==='connectors')loadConnectors();
+}));
+$('loginBtn').addEventListener('click',login);
+$('loginToken').addEventListener('keydown',e=>{if(e.key==='Enter')login()});
+$('logoutBtn').addEventListener('click',logout);
+$('refreshBtn').addEventListener('click',()=>refreshAll());
+$('copyConnector').addEventListener('click',async()=>{
+  const text=$('connectorCode').textContent;
+  try{await navigator.clipboard.writeText(text);$('copyConnector').textContent='Copied';setTimeout(()=>$('copyConnector').textContent='Copy PowerShell setup',1400)}catch{$('copyConnector').textContent='Copy failed'}
+});
+
+(async()=>{
+  try{
+    const d=await api('/api/overview');
+    $('loginWrap').classList.add('hidden');$('app').classList.remove('hidden');
+    overviewData=d;render(d);startRefresh();
+  }catch(e){
+    $('loginWrap').classList.remove('hidden');$('app').classList.add('hidden');
+  }
+})();
+</script>
+</body>
+</html>
