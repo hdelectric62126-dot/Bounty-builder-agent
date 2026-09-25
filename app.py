@@ -31,7 +31,6 @@ from teacher_agent import TeacherAgent
 from revenue_capital_agent import evaluate_capital
 from database_migration import migrate_sqlite_to_postgres
 from bounty_executor import BountyContextLoader, save_build_artifact
-from central_ops import build_ops_router
 
 DATA_DIR = os.getenv("DATA_DIR", "/data")
 try:
@@ -243,7 +242,6 @@ async def lifespan(_app):
 
 
 app = FastAPI(title="Bounty Builder Agent", version="2.0.0", lifespan=lifespan)
-app.include_router(build_ops_router(store, DATA_DIR, database_migration))
 
 
 class Promotion(BaseModel):
@@ -571,6 +569,9 @@ def bounty_build_worker():
 
 @app.get("/health")
 def health():
+    # Keep liveness independent of the database. Worker activity can hold the
+    # SQLite volume lock for several seconds, which made external watchdogs
+    # time out even though the process was healthy.
     return {"status": "ok", "mode": "approval_gated_real_world",
             "database": "postgres" if store.postgres else "sqlite",
             "migration": database_migration,
@@ -579,8 +580,7 @@ def health():
                 "model_configured": bool(openai_api_key()),
                 "cloud_budget": bounty_cloud_budget(),
                 "public_submission_automatic": False,
-            },
-            "stats": store.stats()}
+            }}
 
 
 @app.get("/setup/openai", response_class=HTMLResponse)
